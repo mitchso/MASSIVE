@@ -6,6 +6,7 @@ from string import ascii_uppercase
 import os
 import threading
 from .sample import Sample
+from .helper import *
 
 """
 TODO
@@ -22,25 +23,28 @@ Salt to be included in analysis?
         - graphing faster via multithreading?
 """
 
-def figsave_fast(fig, filename:str):
-    """This function will save an image ~4x faster than simply calling plt.savefig
-    https://www.scaler.com/topics/matplotlib/save-a-plot-in-matplotlib/
-    https://stackoverflow.com/questions/64789437/what-is-the-difference-between-figure-show-figure-canvas-draw-and-figure-canva
-    """
-    fig.canvas.draw_idle()  # Renders the image without displaying it
-    x = np.array(fig.canvas.renderer.buffer_rgba()) # converts the image to bits
-    if filename.endswith('.png'):
-        return plt.imsave(filename, x)
-    else:
-        raise ValueError("filename must end with .png")
-
-
 class Experiment:
-    def __init__(self, xml_file, noise_cutoff=0.90):
-        self.filename = xml_file
-        self.xml_tree = self.xml_to_tree(xml_file)
+    def __init__(self, samples, noise_cutoff=0.90):
+        # self.filename = xml_file
+        # self.xml_tree = self.xml_to_tree(xml_file)
         self.noise_cutoff = noise_cutoff
-        self.samples = self.trees_to_sample_dict()
+        # self.samples = self.trees_to_sample_dict()
+        self.samples = self.reinitiate_samples(samples)
+
+    def reinitiate_samples(self, samples):
+        """
+        Used to overwrite samples when loading them into an Experiment. Useful for when the
+        noise_cutoff originally specified for the Sample is different than the global cutoff for the Experiment.
+        """
+        sample_dict = {}
+        for s in samples:
+            new_sample = Sample(well=s.well,
+                                mz=s.mz,
+                                i=s.i,
+                                noise_cutoff=self.noise_cutoff)
+            sample_dict[s.well] = new_sample
+
+        return sample_dict
 
     def xml_to_tree(self, xml_file: str) -> list:
         """
@@ -104,11 +108,11 @@ class Experiment:
         for row in rows:
             row_data = []
             for col in columns:
-                key = row + col # ie 'C12
+                key = row + col # ie 'C12'
                 try:
                     sample = self.samples[key]  # If key exists, collect data
                     for variable in [numerator, denominator]:
-                        d = np.NaN  # by default, return NaN
+                        d = np.nan  # by default, return NaN
                         try:    # check if variable is an attribute of the sample
                             d = getattr(sample, variable)
                         except AttributeError:  # if it isn't, check MOIs
@@ -125,15 +129,18 @@ class Experiment:
                             denom = d
 
                     if denominator:  # return the ratio of num and denom
-                        try:
-                            d = num / denom
-                        except ZeroDivisionError:
-                            d = np.NaN
+                        if numerator == denominator:
+                            d = 1
+                        else:
+                            try:
+                                d = num / denom
+                            except ZeroDivisionError:
+                                d = np.nan
                     else:   # return numerator only
                         d = num
 
                 except KeyError:    # If key does not exist, leave blank
-                    d = np.NaN
+                    d = np.nan
 
                 row_data.append(d)
             data.append(row_data)

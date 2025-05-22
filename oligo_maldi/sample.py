@@ -5,20 +5,23 @@ from . import oligo
 
 
 class Sample:
-    def __init__(self, spectrum, noise_cutoff: float):
-        self.spectrum = spectrum
-        self.well = spectrum.attrib['info'].replace('+MS, ', '')
+    def __init__(self, well, mz, i, noise_cutoff: float):
+        # self.spectrum = spectrum
+        # self.well = spectrum.attrib['info'].replace('+MS, ', '')
+        self.well = well
         self.name = self.well
         self.mois = []  # MOI = molecule of interest
         self.noise_cutoff = noise_cutoff
 
         # process spectrum
-        self.mz = []
-        self.i = []
+        # self.mz = []
+        # self.i = []
+        self.mz = mz
+        self.i = i
         self.i_bg_subtracted = []
         self.i_filtered = []
 
-        self.unpack_spectrum()  # populates self.mz, self.i
+        # self.unpack_spectrum()  # populates self.mz, self.i
 
         self.background = min(self.i)
         self.i_background_subtracted()  # populates self.i_bg_subtracted
