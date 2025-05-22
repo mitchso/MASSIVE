@@ -24,7 +24,7 @@ Salt to be included in analysis?
 """
 
 class Experiment:
-    def __init__(self, samples, noise_cutoff=0.90):
+    def __init__(self, samples, noise_cutoff=0.95):
         # self.filename = xml_file
         # self.xml_tree = self.xml_to_tree(xml_file)
         self.noise_cutoff = noise_cutoff
