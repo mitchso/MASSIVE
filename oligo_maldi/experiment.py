@@ -323,7 +323,7 @@ class Experiment:
                 except ValueError:  # occurs when there is no data at a particular MOI region
                     pass
 
-    def report(self, threads=4):
+    def report(self, outdir: str, threads=4):
         """
         General:
             - TODO: implement multithreading to speed up plotting.
@@ -340,8 +340,9 @@ class Experiment:
             - signal intensity distribution
             - distance between data
         """
-        root_dir = os.path.dirname(self.filename)
-        folder_path = root_dir + "/report"
+        # root_dir = os.path.dirname(self.filename)
+        # folder_path = root_dir + "/report"
+        folder_path = outdir
 
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)
@@ -406,13 +407,17 @@ class Experiment:
 
         return data
 
-    def write_to_excel(self) -> None:
+    def write_to_excel(self, filename: str) -> None:
         """
         Writes data to an excel file.
         """
 
         # create file
-        outfile = self.filename.replace(".xml", ".xlsx")
+        # outfile = self.filename.replace(".xml", ".xlsx")
+        if filename.endswith('.xlsx'):
+            outfile = filename
+        else:
+            outfile = filename + '.xlsx'
         workbook = xlsxwriter.Workbook(outfile)
         worksheet0 = workbook.add_worksheet('readme')
         worksheet1 = workbook.add_worksheet('mois')
