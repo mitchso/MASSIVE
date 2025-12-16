@@ -161,7 +161,7 @@ class Sample:
         """
         Generates a plot for an MOI, zoomed in to visualize the isotope distribution and mass accuracy.
         """
-        return self.plot(xlim=moi.iso_dist_range(padding=4),
+        return self.plot(xlim=moi.iso_dist_range(),
                          relative=True,
                          theoretical_dist=True,
                          filtered=filtered,
@@ -175,7 +175,7 @@ class Sample:
             label_peaks=False,
             theoretical_dist=False,
             label_mois=False,
-            filtered=True,
+            filtered=False,
             bg_subtracted=False,
             title=None
     ) -> plt.axes:

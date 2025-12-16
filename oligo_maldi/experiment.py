@@ -4,14 +4,19 @@ import numpy as np
 import xlsxwriter
 from string import ascii_uppercase
 import os
+import pyopenms as oms
 import threading
 from .sample import Sample
 from .helper import *
 
+
 """
 TODO
+Use memory efficient methods of retrieving samples: https://pyopenms.readthedocs.io/en/latest/user_guide/reading_raw_ms_data.html
+Allow for combination of multiple mzml files
+once sample names are 
+
 plots should automatically include processing in title (bg subtracted?)
-Salt to be included in analysis?
 
 
     - plotting function to do scatter of any two variables against each other
@@ -24,12 +29,23 @@ Salt to be included in analysis?
 """
 
 class Experiment:
-    def __init__(self, samples, noise_cutoff=0.95):
+    def __init__(self, mzml_file=None, data_folder=None, samples=None, noise_cutoff=0.95):
+        if mzml_file:
+            self.mzml_file = mzml_file
+            self.oms_exp = oms.MSExperiment()
+            oms.MzMLFile().load(self.mzml_file, self.oms_exp)
+            self.noise_cutoff = noise_cutoff
+            self.samples = self.oms_exp_to_sample_dict()
+
+        if data_folder: # Used for neofleX data files, which are stored as a folder of individual text files.
+            self.data_folder = data_folder
+            self.noise_cutoff = noise_cutoff
+            self.samples = self.data_folder_to_sample_dict()
+
         # self.filename = xml_file
         # self.xml_tree = self.xml_to_tree(xml_file)
-        self.noise_cutoff = noise_cutoff
         # self.samples = self.trees_to_sample_dict()
-        self.samples = self.reinitiate_samples(samples)
+        # self.samples = self.reinitiate_samples(samples)
 
     def reinitiate_samples(self, samples):
         """
@@ -46,29 +62,84 @@ class Experiment:
 
         return sample_dict
 
-    def xml_to_tree(self, xml_file: str) -> list:
-        """
-        takes one xml file and converts it to a data tree.
-        """
-        tree = ET.parse(xml_file)
-        root = tree.getroot()
-        return root
+    # deprecated
+    def smooth_experiment(self, gaussian_width=1.0):
+        gf = oms.GaussFilter()
+        param = gf.getParameters()
+        param.setValue("gaussian_width", gaussian_width)  # needs wider width
+        gf.setParameters(param)
+        gf.filterExperiment(self.oms_exp)
 
-    def trees_to_sample_dict(self) -> dict:
-        """
-        converts data tree derived from a MALDI xml file to a dictionary
-        key = sample well ID
-        value = Sample object
-        """
+    # deprecated
+    def centroid_experiment(self):
+        pass
+
+    # deprecated
+    def oms_exp_to_sample_dict(self):
+        num_samples = self.oms_exp.getNrSpectra()   # Each sample is considered 1 spectrum in mzXML file
+        spectra = [self.oms_exp.getSpectrum(x) for x in range(0,num_samples)]
         sample_dict = {}
-        # tree = root -> [2] = analysis -> [1] = DataAnalysis -> [1:] = list of ms_spectrum
-        ms_spectra = self.xml_tree[2][1][1:]
-        for spectrum in ms_spectra:
-            sample = Sample(spectrum,
-                            noise_cutoff=self.noise_cutoff)  # instantiate a Sample object using the data from the ms_spectrum
-            sample_dict[sample.well] = sample  # add to dictionary, key=well, value=Sample object
+        for i, s in enumerate(spectra):
+            new_sample = Sample(well=i,
+                                mz=s.get_peaks()[0],
+                                i=s.get_peaks()[1],
+                                noise_cutoff=self.noise_cutoff)
+            sample_dict[i] = new_sample
 
         return sample_dict
+
+    def data_folder_to_sample_dict(self):
+        """
+        Takes a folder of txt files where each file corresponds to 1 spectra, encoded as m/z - intensity pairs.
+        Returns a sample dictionary where each entry is 1 spectra, named according to filenames.
+
+        example data file:
+        /Users/mitchsyberg-olsen/Library/CloudStorage/Box-Box/lab/data/2025/12/2025-12-05_new_substrate_test/data/2025_12_06_0001_0_E1_1.txt
+        """
+
+        for root, dirs, files in os.walk(self.data_folder):
+            root = root
+            files = files
+
+        sample_dict = {}
+        for file in files:
+            assert file.endswith(".txt")    # checks to make sure you are working with the correct files
+            fields = file.split("_")
+            with open(root + "/" + file, "r") as f:
+                lines = f.readlines()
+
+            new_sample = Sample(well=fields[5], # assumes name follows this structure: 2025_12_06_0001_0_E1_1.txt
+                                mz=[float(line.split(" ")[0]) for line in lines],
+                                i=[int(line.split(" ")[1]) for line in lines],
+                                noise_cutoff=self.noise_cutoff)
+
+            sample_dict[new_sample.well] = new_sample
+
+        return sample_dict
+
+    # def xml_to_tree(self, xml_file: str) -> list:
+    #     """
+    #     takes one xml file and converts it to a data tree.
+    #     """
+    #     tree = ET.parse(xml_file)
+    #     root = tree.getroot()
+    #     return root
+
+    # def trees_to_sample_dict(self) -> dict:
+    #     """
+    #     converts data tree derived from a MALDI xml file to a dictionary
+    #     key = sample well ID
+    #     value = Sample object
+    #     """
+    #     sample_dict = {}
+    #     # tree = root -> [2] = analysis -> [1] = DataAnalysis -> [1:] = list of ms_spectrum
+    #     ms_spectra = self.xml_tree[2][1][1:]
+    #     for spectrum in ms_spectra:
+    #         sample = Sample(spectrum,
+    #                         noise_cutoff=self.noise_cutoff)  # instantiate a Sample object using the data from the ms_spectrum
+    #         sample_dict[sample.well] = sample  # add to dictionary, key=well, value=Sample object
+    #
+    #     return sample_dict
 
     def collect_mois(self) -> list:
         """
@@ -163,7 +234,7 @@ class Experiment:
         fig.tight_layout()
         return fig, ax
 
-    def stacked_plot(self, wells: list, xlim=None, title=None, filtered=True) -> plt.axes:
+    def stacked_plot(self, wells: list, xlim=None, title=None, filtered=True, figsize=None, label_first_only=True) -> plt.axes:
         """
         Takes a list of well IDs and returns a plot of each spectrum stacked vertically.
 
@@ -172,10 +243,11 @@ class Experiment:
         """
 
         plt.style.use('default')
-        if len(wells) > 1:
-            figsize = (8, len(wells) * 1.5)
-        else:
-            figsize = (8, 3)
+        if figsize is None:
+            if len(wells) > 1:
+                figsize = (12, len(wells) * 1)  # (x size, y size)
+            else:
+                figsize = (12, 3)
 
         fig, axs = plt.subplots(nrows=len(wells), ncols=1,
                                 figsize=figsize,  # width, height in inches
@@ -203,6 +275,79 @@ class Experiment:
             except TypeError:
                 axis = axs
 
+            axis.plot(mz_plot, i_plot, linewidth=1.5)
+            axis.set_ylim(-10, 150)
+            axis.set_xlim(min(mz_plot), max(mz_plot))
+            axis.spines['top'].set_visible(False)
+            axis.spines['right'].set_visible(False)
+            axis.spines['left'].set_visible(False)
+            axis.spines['bottom'].set_position(('data', -5))
+
+            axis.text(x=min(mz_plot), y=0, s=f"{sample.name} ", horizontalalignment='right')
+
+            for moi in sample.mois:  # colour mois:
+                moi_range = moi.iso_dist_range()
+                mz_moi, i_moi = sample.slice_spectrum(start=moi_range[0], end=moi_range[1], mz=mz_plot, i=i_plot)
+                axis.plot(mz_moi, i_moi, c='#d1495b', linewidth=1.5)
+                try:
+                    moi_label_height = max(i_moi) + 20
+                except ValueError:
+                    moi_label_height = 20
+
+                if label_first_only:
+                    if n == 0:
+                        if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):  # Add species labels
+                            axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
+                                      fontsize=10)
+                else:
+                    if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):  # Add species labels
+                        axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
+                                  fontsize=10)
+
+        # fig.text(0, 0.5, f'Relative intensity (au)', ha='left', va='center', rotation='vertical')
+        plt.xlabel(f'm/z')
+        plt.yticks([])
+
+        if title:
+            plt.suptitle(title)
+        plt.tight_layout()
+        plt.subplots_adjust(wspace=0, hspace=0)
+
+        return fig, axs
+
+
+    def offset_plot(self, wells: list, xlim=None, title=None, filtered=True) -> plt.axes:
+        """
+        Takes a list of well IDs and returns a plot of each spectrum stacked vertically.
+
+        X-values are determined by xlim parameter. If none provided, use the whole spectrum.
+        Y-values are background corrected and always relative.
+        """
+
+        plt.style.use('default')
+        fig, axis = plt.subplots(figsize=(8,3))  # width, height in inches
+
+        for n, well in enumerate(wells):
+            sample = self.samples[well]
+            mz_plot = sample.mz  # initial mz
+            if filtered:
+                i_plot = sample.i_filtered  # initial i
+            else:
+                i_plot = sample.i
+
+            if xlim:  # slice by xlim
+                mz_plot, i_plot = sample.slice_spectrum(start=xlim[0], end=xlim[1], mz=mz_plot, i=i_plot)
+
+            try:
+                i_max = max(i_plot)  # scale everything relative to what is in range
+                i_plot = [i * 100 / i_max for i in i_plot]
+            except ZeroDivisionError:
+                pass
+
+
+            mz_plot = mz_plot + (n * (xlim[1] - xlim[0]) * 0.15)
+            i_plot = i_plot + (n * 15)
+
             axis.plot(mz_plot, i_plot, linewidth=1)
             axis.set_ylim(0, 125)
             axis.set_xlim(min(mz_plot), max(mz_plot))
@@ -228,7 +373,8 @@ class Experiment:
         plt.tight_layout()
         plt.subplots_adjust(wspace=0, hspace=0)
 
-        return fig, axs
+        return fig, axis
+
 
     def total_ion_plot(self) -> plt.axes:
         """
@@ -342,7 +488,7 @@ class Experiment:
         """
         # root_dir = os.path.dirname(self.filename)
         # folder_path = root_dir + "/report"
-        folder_path = outdir
+        folder_path = outdir + "/report"
 
         if not os.path.exists(folder_path):
             os.makedirs(folder_path)

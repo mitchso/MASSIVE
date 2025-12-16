@@ -7,22 +7,22 @@ import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
 
-colour_dict_old = {'dark grey': '#3a3a3a',
-               'grey': '#747474',
-               'light grey': '#d9d9d9',
-               'lighter grey': '#f2f2f2',
-
-               'dark blue': '#4472c4',
-               'blue': '#5089ee',
-               'light blue': '#a6caec',
-
-               'dark red': '#af4c3a',
-               'red': '#da5e48',
-               'light red': '#ff6f55',
-
-               'dark green': '#006837',
-               'green': '#009245',
-               'light green': '#8cc63f'}
+# colour_dict_old = {'dark grey': '#3a3a3a',
+#                'grey': '#747474',
+#                'light grey': '#d9d9d9',
+#                'lighter grey': '#f2f2f2',
+#
+#                'dark blue': '#4472c4',
+#                'blue': '#5089ee',
+#                'light blue': '#a6caec',
+#
+#                'dark red': '#af4c3a',
+#                'red': '#da5e48',
+#                'light red': '#ff6f55',
+#
+#                'dark green': '#006837',
+#                'green': '#009245',
+#                'light green': '#8cc63f'}
 
 
 colour_dict = {'dark grey': '#333333',

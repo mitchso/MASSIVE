@@ -115,7 +115,7 @@ class Oligo:
         else:   # add a stem plot to existing figure, return nothing
             plt.stem(x, y, markerfmt='.', linefmt='#d1495b', label='Theoretical')
 
-    def iso_dist_range(self, cumulative_threshold=0.95, padding=1.5) -> tuple:
+    def iso_dist_range(self, cumulative_threshold=0.95, left_pad=6, right_pad=6) -> tuple:
         """
         Calculates the mass range where isotopes of the same molecule may be observed.
 
@@ -140,7 +140,7 @@ class Oligo:
             else:
                 break
 
-        cumulative_range = (min(cumulative_mz_vals)-padding, max(cumulative_mz_vals)+padding)
+        cumulative_range = (min(cumulative_mz_vals)-left_pad, max(cumulative_mz_vals)+right_pad)
         return cumulative_range
 
     def mai_intensity(self, sample, i_type='filtered') -> float:
