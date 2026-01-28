@@ -2,26 +2,24 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 import numpy as np
 from . import oligo
+from warnings import deprecated
 
 
 class Sample:
-    def __init__(self, well, mz, i, noise_cutoff: float):
-        # self.spectrum = spectrum
-        # self.well = spectrum.attrib['info'].replace('+MS, ', '')
+    def __init__(self, well, mz, i, noise_cutoff: float, chip=0, mz_offset=0):
+        self.chip = chip    # for AnchorChip plates, chip=0 refers to regular sample spots and chip=1 refers to calibrant spots
         self.well = well
         self.name = self.well
         self.mois = []  # MOI = molecule of interest
         self.noise_cutoff = noise_cutoff
+        self.mz_offset = mz_offset  # used to manually adjust the spectra if calibration is off.
 
         # process spectrum
-        # self.mz = []
-        # self.i = []
-        self.mz = mz
+        self.mz_raw = mz    # Keeps a record of the original mz values
+        self.mz = mz    # can be updated using the recalc_mz() method
         self.i = i
         self.i_bg_subtracted = []
         self.i_filtered = []
-
-        # self.unpack_spectrum()  # populates self.mz, self.i
 
         self.background = min(self.i)
         self.i_background_subtracted()  # populates self.i_bg_subtracted
@@ -34,6 +32,11 @@ class Sample:
         self.max_i = max(self.i)
         self.num_points = len(self.i)
 
+    def recalc_mz(self):
+        """Updates self.mz, useful when mz_offset has been changed."""
+        self.mz = [point + self.mz_offset for point in self.mz_raw]
+
+    @deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
     def unpack_spectrum(self):
         """
         Populates self.mz and self.i with values from a spectrum.

@@ -8,6 +8,8 @@ import pyopenms as oms
 import threading
 from .sample import Sample
 from .helper import *
+from warnings import deprecated
+import random
 
 
 """
@@ -29,8 +31,8 @@ plots should automatically include processing in title (bg subtracted?)
 """
 
 class Experiment:
-    def __init__(self, mzml_file=None, data_folder=None, samples=None, noise_cutoff=0.95):
-        if mzml_file:
+    def __init__(self, mzml_file=None, data_folder=None, noise_cutoff=0.95):
+        if mzml_file:   # no longer used
             self.mzml_file = mzml_file
             self.oms_exp = oms.MSExperiment()
             oms.MzMLFile().load(self.mzml_file, self.oms_exp)
@@ -40,12 +42,8 @@ class Experiment:
         if data_folder: # Used for neofleX data files, which are stored as a folder of individual text files.
             self.data_folder = data_folder
             self.noise_cutoff = noise_cutoff
-            self.samples = self.data_folder_to_sample_dict()
+            self.samples, self.calibrant_spots = self.data_folder_to_sample_dict()
 
-        # self.filename = xml_file
-        # self.xml_tree = self.xml_to_tree(xml_file)
-        # self.samples = self.trees_to_sample_dict()
-        # self.samples = self.reinitiate_samples(samples)
 
     def reinitiate_samples(self, samples):
         """
@@ -62,7 +60,7 @@ class Experiment:
 
         return sample_dict
 
-    # deprecated
+    @deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
     def smooth_experiment(self, gaussian_width=1.0):
         gf = oms.GaussFilter()
         param = gf.getParameters()
@@ -70,11 +68,11 @@ class Experiment:
         gf.setParameters(param)
         gf.filterExperiment(self.oms_exp)
 
-    # deprecated
+    @deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
     def centroid_experiment(self):
         pass
 
-    # deprecated
+    @deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
     def oms_exp_to_sample_dict(self):
         num_samples = self.oms_exp.getNrSpectra()   # Each sample is considered 1 spectrum in mzXML file
         spectra = [self.oms_exp.getSpectrum(x) for x in range(0,num_samples)]
@@ -102,44 +100,30 @@ class Experiment:
             files = files
 
         sample_dict = {}
+        calibrant_dict = {}
         for file in files:
             assert file.endswith(".txt")    # checks to make sure you are working with the correct files
             fields = file.split("_")
             with open(root + "/" + file, "r") as f:
                 lines = f.readlines()
 
-            new_sample = Sample(well=fields[5], # assumes name follows this structure: 2025_12_06_0001_0_E1_1.txt
+            # assumes name follows this structure:
+            #   0      1      2      3      4      5        6
+            # 2025_12_06_0001_0_E1_1.txt
+            # [year]_[month]_[day]_[run#]_[chip]_[well]_[replicate].txt
+            new_sample = Sample(chip=int(fields[4]),
+                                well=fields[5],
                                 mz=[float(line.split(" ")[0]) for line in lines],
                                 i=[int(line.split(" ")[1]) for line in lines],
                                 noise_cutoff=self.noise_cutoff)
 
-            sample_dict[new_sample.well] = new_sample
+            if new_sample.chip == 0:
+                sample_dict[new_sample.well] = new_sample
 
-        return sample_dict
+            elif new_sample.chip == 1:
+                calibrant_dict[new_sample.well] = new_sample
 
-    # def xml_to_tree(self, xml_file: str) -> list:
-    #     """
-    #     takes one xml file and converts it to a data tree.
-    #     """
-    #     tree = ET.parse(xml_file)
-    #     root = tree.getroot()
-    #     return root
-
-    # def trees_to_sample_dict(self) -> dict:
-    #     """
-    #     converts data tree derived from a MALDI xml file to a dictionary
-    #     key = sample well ID
-    #     value = Sample object
-    #     """
-    #     sample_dict = {}
-    #     # tree = root -> [2] = analysis -> [1] = DataAnalysis -> [1:] = list of ms_spectrum
-    #     ms_spectra = self.xml_tree[2][1][1:]
-    #     for spectrum in ms_spectra:
-    #         sample = Sample(spectrum,
-    #                         noise_cutoff=self.noise_cutoff)  # instantiate a Sample object using the data from the ms_spectrum
-    #         sample_dict[sample.well] = sample  # add to dictionary, key=well, value=Sample object
-    #
-    #     return sample_dict
+        return sample_dict, calibrant_dict
 
     def collect_mois(self) -> list:
         """
@@ -160,17 +144,23 @@ class Experiment:
         Creates a scatter plot of any two variables across the entire experiment.
 
         """
-        pass
+        pass    # stub
 
-    def heatmap(self, numerator, denominator=None) -> plt.axes:
+    def heatmap(self, numerator, denominator=None, vmin=0, vmax=None, title=None, cmap='viridis') -> plt.axes:
         """
         Creates a heatmap of a variable across the 386 well sample plate.
-        Possible variables:
-        Sample total_ion, noise, background, or any MOI.
-        If an MOI is indicated, the value for moi.mai_intensity() for that MOI will be plotted.
 
-        If only numerator is specified, the value of that variable will be plotted.
-        If numerator and denominator are specified, the ratio of the two will be plotted.
+        numerator and denominator
+            Possible variables:
+            Sample total_ion, noise, background, or any MOI.
+            If an MOI is indicated, the value for moi.mai_intensity() for that MOI will be plotted.
+            If only numerator is specified, the value of that variable will be plotted.
+            If numerator and denominator are specified, the ratio of the two will be plotted.
+
+        vmin: lower bound of data range covered by colour map
+        vmax: upper bound of data range covered by colour map
+        cmap: colormap to use (see docs online for pyplot.imshow()
+        title: title of the plot
         """
         rows = list(ascii_uppercase[:16])   # ABCDEFGHIJKLMOP
         columns = [str(i) for i in range(1, 25)]    # 1-24
@@ -218,38 +208,45 @@ class Experiment:
 
         plt.style.use('default')
         fig, ax = plt.subplots()
-        im = ax.imshow(data)
-        cbar = ax.figure.colorbar(im, ax=ax)
+        im = ax.imshow(data, vmin=vmin, vmax=vmax, cmap=cmap)
+        cbar = ax.figure.colorbar(im, ax=ax, shrink=0.7)
 
         # Show all ticks and label them with the respective list entries
         ax.set_xticks(range(len(columns)), labels=columns)
         ax.set_yticks(range(len(rows)), labels=rows)
 
-        if denominator:
-            title = f"{numerator} / {denominator}"
+        if title is None:
+            if denominator:
+                title = f"{numerator} / {denominator}"
+            else:
+                title = numerator
         else:
-            title = numerator
+            pass
 
         ax.set_title(title)
         fig.tight_layout()
         return fig, ax
 
-    def stacked_plot(self, wells: list, xlim=None, title=None, filtered=True, figsize=None, label_first_only=True) -> plt.axes:
+    def stacked_plot(self, wells: list, xlim=None, title=None, filtered=False, figsize=None,
+                     label_first_only=True, overlay=False) -> plt.axes:
         """
         Takes a list of well IDs and returns a plot of each spectrum stacked vertically.
 
         X-values are determined by xlim parameter. If none provided, use the whole spectrum.
         Y-values are background corrected and always relative.
         """
-
         plt.style.use('default')
         if figsize is None:
-            if len(wells) > 1:
-                figsize = (12, len(wells) * 1)  # (x size, y size)
-            else:
+            if overlay:
                 figsize = (12, 3)
+            if not overlay:
+                if len(wells) > 1:
+                    figsize = (12, len(wells) * 1)  # (x size, y size)
+                else:
+                    figsize = (12, 3)
 
-        fig, axs = plt.subplots(nrows=len(wells), ncols=1,
+        fig, axs = plt.subplots(nrows=1 if overlay else len(wells),
+                                ncols=1,
                                 figsize=figsize,  # width, height in inches
                                 sharex=True, sharey=True)
 
@@ -264,9 +261,15 @@ class Experiment:
             if xlim:  # slice by xlim
                 mz_plot, i_plot = sample.slice_spectrum(start=xlim[0], end=xlim[1], mz=mz_plot, i=i_plot)
 
+
             try:
                 i_max = max(i_plot)  # scale everything relative to what is in range
                 i_plot = [i * 100 / i_max for i in i_plot]
+                if overlay:
+                    # many overlapping peaks that are too uniform becomes hard to read.
+                    # this section will randomly scale down each spectrum to create some variation
+                    small_offset = random.uniform(0.90, 1.00)
+                    i_plot = [i * small_offset for i in i_plot]
             except ZeroDivisionError:
                 pass
 
@@ -283,12 +286,14 @@ class Experiment:
             axis.spines['left'].set_visible(False)
             axis.spines['bottom'].set_position(('data', -5))
 
-            axis.text(x=min(mz_plot), y=0, s=f"{sample.name} ", horizontalalignment='right')
+            if not overlay:
+                axis.text(x=min(mz_plot), y=0, s=f"{sample.name} ", horizontalalignment='right')
 
             for moi in sample.mois:  # colour mois:
                 moi_range = moi.iso_dist_range()
                 mz_moi, i_moi = sample.slice_spectrum(start=moi_range[0], end=moi_range[1], mz=mz_plot, i=i_plot)
-                axis.plot(mz_moi, i_moi, c='#d1495b', linewidth=1.5)
+                if not overlay:
+                    axis.plot(mz_moi, i_moi, c='#d1495b', linewidth=1.5)
                 try:
                     moi_label_height = max(i_moi) + 20
                 except ValueError:
@@ -304,7 +309,6 @@ class Experiment:
                         axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
                                   fontsize=10)
 
-        # fig.text(0, 0.5, f'Relative intensity (au)', ha='left', va='center', rotation='vertical')
         plt.xlabel(f'm/z')
         plt.yticks([])
 
@@ -397,7 +401,7 @@ class Experiment:
 
         return fig, ax
 
-    def sorted_signal_plot(self, xlim=[50,100]) -> plt.axes:
+    def sorted_signal_plot(self, xlim=[50,100], label_noisy_samples=False) -> plt.axes:
         """
         Generates .
         """
@@ -412,17 +416,19 @@ class Experiment:
             y = sorted([i * 100 / y_max for i in sample.i])
             plt.plot(x, y)
 
-            y_at_cutoff = y[round(self.noise_cutoff * len(y))]
-            if y_at_cutoff > 10:
-                plt.text(x=self.noise_cutoff * 100, y=y_at_cutoff + 1, s=f" {well}")
+            if label_noisy_samples:
+                y_at_cutoff = y[round(self.noise_cutoff * len(y))]
+                if y_at_cutoff > 10:
+                    plt.text(x=self.noise_cutoff * 100, y=y_at_cutoff + 1, s=f" {well}")
 
         plt.xlim(xlim)
         plt.yticks(np.linspace(0, 100, num=11))
 
         plt.axvline(x=self.noise_cutoff * 100)
-        plt.text(x=self.noise_cutoff * 100, y=90, s=" Noise cutoff")
-        plt.text(x=self.noise_cutoff * 100, y=50, s=" Samples w/\n S/N<10")
-
+        plt.text(x=self.noise_cutoff * 100, y=0, s=" Noise cutoff")
+        if label_noisy_samples:
+            plt.text(x=self.noise_cutoff * 100, y=50, s=" Samples w/\n S/N<10")
+        plt.ylim(ymin=0)
         plt.title(f"Per sample signal intensity distribution")
         plt.xlabel(f'Percent of data')
         plt.ylabel(f'Relative signal')
@@ -553,7 +559,7 @@ class Experiment:
 
         return data
 
-    def write_to_excel(self, filename: str) -> None:
+    def write_to_excel(self, filename: str, overwrite=False) -> None:
         """
         Writes data to an excel file.
         """
@@ -564,6 +570,13 @@ class Experiment:
             outfile = filename
         else:
             outfile = filename + '.xlsx'
+
+        if not overwrite:
+            if os.path.exists(outfile):
+                print(f"\'write_to_excel()\' did not execute because the file already exists.\n"
+                      f"To proceed anyway, use parameter \'overwrite=True\'.")
+                return
+
         workbook = xlsxwriter.Workbook(outfile)
         worksheet0 = workbook.add_worksheet('readme')
         worksheet1 = workbook.add_worksheet('mois')
@@ -615,10 +628,15 @@ class Experiment:
             # write data
             i = 1
             data = self.collect_sample_data(i_type=i_type)  # collect data according to i_type param
-            for k, v in data.items():  # iterate through samples
+
+            # lambda function sorts keys by letter (row) and then number (column)
+            sorted_keys = sorted(data.keys(), key=lambda x: (x[0], int(x[1:])))
+
+            for key in sorted_keys:
+                value = data[key]
                 for j, header in enumerate(headers):  # iterate through headers
                     try:
-                        worksheet.write(i, j, v[header])  # if data matches header, write
+                        worksheet.write(i, j, value[header])  # if data matches header, write
                     except KeyError:
                         worksheet.write(i, j, "n/a")  # if no data exists for this header, write n/a
                 i += 1

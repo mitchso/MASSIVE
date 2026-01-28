@@ -115,7 +115,7 @@ class Oligo:
         else:   # add a stem plot to existing figure, return nothing
             plt.stem(x, y, markerfmt='.', linefmt='#d1495b', label='Theoretical')
 
-    def iso_dist_range(self, cumulative_threshold=0.95, left_pad=6, right_pad=6) -> tuple:
+    def iso_dist_range(self, cumulative_threshold=0.95, left_pad=15, right_pad=15) -> tuple:
         """
         Calculates the mass range where isotopes of the same molecule may be observed.
 
