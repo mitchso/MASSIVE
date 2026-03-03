@@ -2,17 +2,29 @@ import matplotlib.pyplot as plt
 from scipy.signal import find_peaks
 import numpy as np
 from . import oligo
+from . import enzyme
 from warnings import deprecated
 
 
 class Sample:
-    def __init__(self, well, mz, i, noise_cutoff: float, chip=0, mz_offset=0):
+    def __init__(self, file, well, mz, i, noise_cutoff: float, chip=0, mz_offset=0):
         self.chip = chip    # for AnchorChip plates, chip=0 refers to regular sample spots and chip=1 refers to calibrant spots
+        self.file = file    # source data file
         self.well = well
-        self.name = self.well
-        self.mois = []  # MOI = molecule of interest
+        self.name = self.well   # default naming but this can be changed
         self.noise_cutoff = noise_cutoff
         self.mz_offset = mz_offset  # used to manually adjust the spectra if calibration is off.
+
+        # Optional, experiment dependent attributes
+        self.enzyme = enzyme.Enzyme(id=None, name="None")
+        self.ntp = None
+        # allows flexibility for other experimental designs. Can include anything here, and then it will show up in the excel output
+        self.misc_conditions = {
+            # 'incubation_time': None,  # examples
+            # 'cation': None
+        }
+
+        self.mois = []  # MOI = molecule of interest
 
         # process spectrum
         self.mz_raw = mz    # Keeps a record of the original mz values
@@ -35,6 +47,11 @@ class Sample:
     def recalc_mz(self):
         """Updates self.mz, useful when mz_offset has been changed."""
         self.mz = [point + self.mz_offset for point in self.mz_raw]
+
+    def misc_conditions_to_attributes(self):
+        """Converts the misc_conditions dictionary to attributes."""
+        for k, v in self.misc_conditions.items():
+            setattr(self, k, v)
 
     @deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
     def unpack_spectrum(self):

@@ -1,4 +1,7 @@
+from csv import excel
+
 import matplotlib.pyplot as plt
+import matplotlib.ticker as tck
 import xml.etree.ElementTree as ET
 import numpy as np
 import xlsxwriter
@@ -11,24 +14,6 @@ from .helper import *
 from warnings import deprecated
 import random
 
-
-"""
-TODO
-Use memory efficient methods of retrieving samples: https://pyopenms.readthedocs.io/en/latest/user_guide/reading_raw_ms_data.html
-Allow for combination of multiple mzml files
-once sample names are 
-
-plots should automatically include processing in title (bg subtracted?)
-
-
-    - plotting function to do scatter of any two variables against each other
-    - interactive plot to choose noise_cutoff
-    - More intelligent signal processing
-        - adjust signal based on expected distribution
-        - differentiate between noise and low signal based on distribution
-    - increase the speed of the report() function
-        - graphing faster via multithreading?
-"""
 
 class Experiment:
     def __init__(self, mzml_file=None, data_folder=None, noise_cutoff=0.95):
@@ -43,6 +28,7 @@ class Experiment:
             self.data_folder = data_folder
             self.noise_cutoff = noise_cutoff
             self.samples, self.calibrant_spots = self.data_folder_to_sample_dict()
+            self.exclude = [] # used to remove certain wells from further analysis.
 
 
     def reinitiate_samples(self, samples):
@@ -102,7 +88,9 @@ class Experiment:
         sample_dict = {}
         calibrant_dict = {}
         for file in files:
-            assert file.endswith(".txt")    # checks to make sure you are working with the correct files
+            if file == ".DS_Store":
+                continue
+            assert file.endswith(".txt"), f"Wrong file suffix: {file}"    # checks to make sure you are working with the correct files
             fields = file.split("_")
             with open(root + "/" + file, "r") as f:
                 lines = f.readlines()
@@ -112,6 +100,7 @@ class Experiment:
             # 2025_12_06_0001_0_E1_1.txt
             # [year]_[month]_[day]_[run#]_[chip]_[well]_[replicate].txt
             new_sample = Sample(chip=int(fields[4]),
+                                file=file,
                                 well=fields[5],
                                 mz=[float(line.split(" ")[0]) for line in lines],
                                 i=[int(line.split(" ")[1]) for line in lines],
@@ -139,6 +128,23 @@ class Experiment:
 
         return sorted_mois
 
+    # TODO: integrate this into write_excel()
+    def collect_misc_conditions(self) -> list:
+        """
+        Collects all variables defined in experimental samples (Sample.misc_conditions, removes duplicates,
+        and returns them as an alphabetically sorted list.
+        """
+        condition_list = []
+        for s in self.samples.values():
+            for c in s.misc_conditions.items():
+                condition_list.extend(c)
+
+        unique_conditions = list(set(condition_list))
+        sorted_conditions = sorted(unique_conditions)
+
+        return sorted_conditions
+
+
     def scatter(self, x, y, regression=False) -> plt.axes:
         """
         Creates a scatter plot of any two variables across the entire experiment.
@@ -146,9 +152,61 @@ class Experiment:
         """
         pass    # stub
 
-    def heatmap(self, numerator, denominator=None, vmin=0, vmax=None, title=None, cmap='viridis') -> plt.axes:
+    def show_sample_positions(self):
         """
-        Creates a heatmap of a variable across the 386 well sample plate.
+        Used to visualize sample definitions on a 384-well plate, so you know you've done it right.
+        :return:
+        """
+        rows = list(ascii_uppercase[:16])  # ABCDEFGHIJKLMOP
+        columns = [str(i) for i in range(1, 25)]  # 1-24
+
+        plt.style.use('default')
+        fig, ax = plt.subplots(figsize=(12, 18))
+        im = ax.imshow(np.zeros((16, 24)), vmax=0, vmin=-1, cmap='gray')
+
+        ntp_colours = {'G': 'blue',
+                       'C': 'red',
+                       'A': 'green',
+                       'T': '#FFBF00'} # yellow
+
+        for i, row in enumerate(rows):
+            for j, col in enumerate(columns):
+                well = row + str(col)
+
+                if well in self.exclude:
+                    ax.text(x=j, y=i, s=f"excl.", horizontalalignment='center', verticalalignment='center', fontsize=5)
+                    continue
+
+                try:
+                    sample = self.samples[well]
+                    ax.text(x=j, y=i, s=f"{sample.enzyme.id}\n", horizontalalignment='center', verticalalignment='center', fontsize=10)
+                    ax.text(x=j, y=i, s=f"\n{sample.ntp}",  color=ntp_colours[sample.ntp],
+                            horizontalalignment='center', verticalalignment='center', fontsize=10)
+
+                except KeyError:
+                    pass
+                except AttributeError:
+                    pass
+
+        # Show all ticks and label them with the respective list entries
+        ax.set_xticks(range(len(columns)), labels=columns)
+        ax.set_yticks(range(len(rows)), labels=rows)
+        ax.tick_params(top=True, bottom=True,
+                       labeltop=True, labelbottom=True, right=True, labelright=True)
+        ax.tick_params(length=0, which='minor')
+
+        ax.xaxis.set_minor_locator(tck.AutoMinorLocator(2))
+        ax.yaxis.set_minor_locator(tck.AutoMinorLocator(2))
+        ax.grid(which="minor", color="black", linestyle='-', linewidth=0.25, snap=False)
+
+        fig.tight_layout()
+        return fig, ax
+
+
+    def heatmap(self, numerator, denominator=None, vmin=0, vmax=None, title=None, cmap='viridis',
+                hide_excluded=False) -> plt.axes:
+        """
+        Creates a heatmap of a variable across the 384 well sample plate.
 
         numerator and denominator
             Possible variables:
@@ -170,6 +228,11 @@ class Experiment:
             row_data = []
             for col in columns:
                 key = row + col # ie 'C12'
+
+                if hide_excluded is True and key in self.exclude:
+                    row_data.append(np.nan)
+                    continue
+
                 try:
                     sample = self.samples[key]  # If key exists, collect data
                     for variable in [numerator, denominator]:
@@ -214,6 +277,13 @@ class Experiment:
         # Show all ticks and label them with the respective list entries
         ax.set_xticks(range(len(columns)), labels=columns)
         ax.set_yticks(range(len(rows)), labels=rows)
+        ax.tick_params(top=True, labeltop=True,
+                       bottom=True, labelbottom=True,
+                       right=True, labelright=True)
+        ax.tick_params(length=0, which='minor')
+        ax.xaxis.set_minor_locator(tck.AutoMinorLocator(2))
+        ax.yaxis.set_minor_locator(tck.AutoMinorLocator(2))
+        ax.grid(which="minor", color="black", linestyle='-', linewidth=0.25, snap=False)
 
         if title is None:
             if denominator:
@@ -228,7 +298,7 @@ class Experiment:
         return fig, ax
 
     def stacked_plot(self, wells: list, xlim=None, title=None, filtered=False, figsize=None,
-                     label_first_only=True, overlay=False) -> plt.axes:
+                     label=True, label_first_only=True, overlay=False, hide_excluded=True) -> plt.axes:
         """
         Takes a list of well IDs and returns a plot of each spectrum stacked vertically.
 
@@ -251,6 +321,9 @@ class Experiment:
                                 sharex=True, sharey=True)
 
         for n, well in enumerate(wells):
+            if hide_excluded is True and well in self.exclude:
+                continue
+
             sample = self.samples[well]
             mz_plot = sample.mz  # initial mz
             if filtered:
@@ -294,20 +367,25 @@ class Experiment:
                 mz_moi, i_moi = sample.slice_spectrum(start=moi_range[0], end=moi_range[1], mz=mz_plot, i=i_plot)
                 if not overlay:
                     axis.plot(mz_moi, i_moi, c='#d1495b', linewidth=1.5)
-                try:
-                    moi_label_height = max(i_moi) + 20
-                except ValueError:
-                    moi_label_height = 20
 
-                if label_first_only:
-                    if n == 0:
+                if label:
+                    if overlay:
+                        moi_label_height = 105
+                    else:
+                        try:
+                            moi_label_height = max(i_moi) + 20
+                        except ValueError:
+                            moi_label_height = 20
+
+                    if label_first_only:
+                        if n == 0:
+                            if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):  # Add species labels
+                                axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
+                                          fontsize=10)
+                    else:
                         if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):  # Add species labels
                             axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
                                       fontsize=10)
-                else:
-                    if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):  # Add species labels
-                        axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
-                                  fontsize=10)
 
         plt.xlabel(f'm/z')
         plt.yticks([])
@@ -403,7 +481,8 @@ class Experiment:
 
     def sorted_signal_plot(self, xlim=[50,100], label_noisy_samples=False) -> plt.axes:
         """
-        Generates .
+        Visualizes the signal intensity of an entire sample, sorted from low to high and showing how the
+        'noise_cutoff' parameter aligns with the data.
         """
 
         plt.style.use('default')
@@ -425,7 +504,7 @@ class Experiment:
         plt.yticks(np.linspace(0, 100, num=11))
 
         plt.axvline(x=self.noise_cutoff * 100)
-        plt.text(x=self.noise_cutoff * 100, y=0, s=" Noise cutoff")
+        # plt.text(x=self.noise_cutoff * 100, y=0, s=" Noise cutoff")
         if label_noisy_samples:
             plt.text(x=self.noise_cutoff * 100, y=50, s=" Samples w/\n S/N<10")
         plt.ylim(ymin=0)
@@ -435,6 +514,7 @@ class Experiment:
 
         return fig, ax
 
+    @deprecated("report() is no longer being maintained.")
     def plot_wells(self, wells: dict, folder_path: str):
         """Helper function for report()."""
 
@@ -475,6 +555,7 @@ class Experiment:
                 except ValueError:  # occurs when there is no data at a particular MOI region
                     pass
 
+    @deprecated("report() is no longer being maintained.")
     def report(self, outdir: str, threads=4):
         """
         General:
@@ -540,84 +621,122 @@ class Experiment:
         # Turn interactive plotting back on
         plt.ion()
 
-    def collect_sample_data(self, i_type='filtered') -> dict:
+    def collect_sample_data(self, headers: list, i_type='filtered') -> dict:
         """
         Collects general sample information and the most abundant ion intensity for each sample.
         """
 
         data = {}
         for k, v in self.samples.items():
-            data[k] = {'well': v.well,
-                       'name': v.name,
-                       'background': v.background,
-                       'noise': v.noise,
-                       'noise_cutoff': v.noise_cutoff,
-                       'total_ion_count': sum(v.i)}
+            if k in self.exclude:
+                continue
 
-            for moi in v.mois:
-                data[k][moi.name] = moi.mai_intensity(sample=v, i_type=i_type)
+            data[k] = {}
+            for item in headers:
+                # first, try to see if it's a normal attribute
+                try:
+                    data[k][item] = getattr(v, item)
+                    continue
+                except AttributeError:
+                    pass
+
+                # if that doesn't work, it could be an enzyme attribute
+                if "enz_" in item:
+                    data[k][item] = getattr(v.enzyme, item.replace("enz_", ""))
+                    continue
+
+                # if that doesn't work, it could be a MOI species
+                for moi in v.mois:
+                    if moi.name == item:
+                        data[k][item] = moi.mai_intensity(sample=v, i_type=i_type)
 
         return data
 
-    def write_to_excel(self, filename: str, overwrite=False) -> None:
-        """
-        Writes data to an excel file.
-        """
-
-        # create file
-        # outfile = self.filename.replace(".xml", ".xlsx")
-        if filename.endswith('.xlsx'):
-            outfile = filename
-        else:
-            outfile = filename + '.xlsx'
-
-        if not overwrite:
-            if os.path.exists(outfile):
-                print(f"\'write_to_excel()\' did not execute because the file already exists.\n"
-                      f"To proceed anyway, use parameter \'overwrite=True\'.")
-                return
-
-        workbook = xlsxwriter.Workbook(outfile)
-        worksheet0 = workbook.add_worksheet('readme')
-        worksheet1 = workbook.add_worksheet('mois')
+    def write_excel_readme(self, workbook):
+        """Adds a README worksheet to the data output workbook. Use with write_to_excel()."""
 
         # write README
         readme = f"""
-        mois: Contains all molecules of interest and their associated information.
+                mois: Contains all molecules of interest and their associated information.
 
-        raw: Unprocessed data. Each entry corresponds to the ion intensity of the most abundant isotope of a given molecule.
+                raw: Unprocessed data. Each entry corresponds to the ion intensity of the most abundant isotope of a given molecule.
 
-        bg_sub: Raw data with background subtraction.
+                bg_sub: Raw data with background subtraction.
 
-        filtered: Background subtracted data with noise removed. Any value that appears here is in the 90th percentile 
-        of signal intensity for a given sample.
+                filtered: Background subtracted data with noise removed. Any value that appears here is in the 90th percentile 
+                of signal intensity for a given sample.
 
-        Background calculation:
-            Background = lowest value across the entire spectrum for a given sample.
+                Background calculation:
+                    Background = lowest value across the entire spectrum for a given sample.
 
-        Noise calculation: 
-            Noise = For a given spectrum, anything less than the 90th percentile of all data, in terms of absolute ion intensity.
-            90th percentile is chosen by default, but can be changed when an Experiment object is instantiated using the 
-            'noise_cutoff' parameter.
-        """
-        worksheet0.insert_textbox('B2', readme,
-                                  {'width': 1000, 'height': 1000})
-        # worksheet0.write(0, 0, readme)
+                Noise calculation: 
+                    Noise = For a given spectrum, anything less than the 90th percentile of all data, in terms of absolute ion intensity.
+                    90th percentile is chosen by default, but can be changed when an Experiment object is instantiated using the 
+                    'noise_cutoff' parameter.
+                """
+
+        worksheet = workbook.add_worksheet('readme')
+        worksheet.insert_textbox('B2', readme, {'width': 1000, 'height': 1000})
+
+
+    def write_excel_mois(self, workbook):
+        """Adds a worksheet to the data output workbook, containing information about.
+         All the molecules of interest in the experiment.
+         Use with write_to_excel()."""
+
+        worksheet = workbook.add_worksheet('mois')
 
         # write MOI data
         headers = ['name', 'sequence', 'composition', 'monoisotopic mass', 'average mass']
         for i, header in enumerate(headers):  # write headers
-            worksheet1.write(0, i, header)
+            worksheet.write(0, i, header)
 
         mois = self.collect_mois()
         for i, moi in enumerate(mois):  # i + 1 for row
             data = [moi.name, moi.seq, moi.composition_str(), moi.monoisotopic_mass, moi.average_mass]
             for j, ele in enumerate(data):  # j for column
-                worksheet1.write(i + 1, j, ele)
+                worksheet.write(i + 1, j, ele)
 
+    def collect_attributes_for_excel(self):
+        """Collects all attributes from samples that should be written to excel."""
+
+        # collect regular attributes
+        meta_attributes = []
+        for s in self.samples.values():
+            s.misc_conditions_to_attributes()   # first, convert all misc_conditions to attributes of the sample
+            for k, v in s.__dict__.items(): # iterate through attributes
+                if isinstance(v, (str, int, float)):    # only take those that are strings, ints or floats
+                    meta_attributes.append(k)
+
+        # Clean up, sort, remove junk
+        meta_attributes = sorted(list(set(meta_attributes)))
+        essential = ['file', 'chip', 'well', 'name']
+        for i, e in enumerate(essential):
+            meta_attributes.remove(e)
+            meta_attributes.insert(i, e)
+
+        junk = ['max_i', 'num_points', 'total_ion']
+        for j in junk:
+            meta_attributes.remove(j)
+
+        # collect enzyme stuff
+        enzyme_attributes = []
+        for s in self.samples.values():
+            for k, v in s.enzyme.__dict__.items():
+                if isinstance(v, (str, int, float)):
+                    enzyme_attributes.append(k)
+        enzyme_attributes = sorted(list(set(enzyme_attributes)))
+        enzyme_attributes = ["enz_" + a for a in enzyme_attributes]
+
+        # collect moi stuff
+        moi_attributes = [m.name for m in self.collect_mois()]
+
+        return meta_attributes + enzyme_attributes + moi_attributes
+
+    def write_excel_data(self, workbook):
+        """Adds worksheets to the data output workbook, containing all experimental data."""
         # write data sheets
-        headers = ['well', 'name', 'background', 'noise', 'noise_cutoff', 'total_ion_count'] + [m.name for m in
-                                                                                                self.collect_mois()]
+        headers = self.collect_attributes_for_excel()
 
         i_types = ['raw', 'bg_sub', 'filtered']
         for i_type in i_types:
@@ -627,7 +746,7 @@ class Experiment:
 
             # write data
             i = 1
-            data = self.collect_sample_data(i_type=i_type)  # collect data according to i_type param
+            data = self.collect_sample_data(headers=headers, i_type=i_type)  # collect data according to i_type param
 
             # lambda function sorts keys by letter (row) and then number (column)
             sorted_keys = sorted(data.keys(), key=lambda x: (x[0], int(x[1:])))
@@ -641,5 +760,25 @@ class Experiment:
                         worksheet.write(i, j, "n/a")  # if no data exists for this header, write n/a
                 i += 1
 
+
+
+    def write_to_excel(self, filename: str, overwrite=False) -> None:
+        """
+        Writes data to an excel file.
+        """
+
+        # create file
+        outfile = filename if filename.endswith(".xlsx") else filename + ".xlsx"
+
+        if not overwrite:
+            if os.path.exists(outfile):
+                print(f"\'write_to_excel()\' did not execute because the file already exists.\n"
+                      f"To proceed anyway, use parameter \'overwrite=True\'.")
+                return
+
+        workbook = xlsxwriter.Workbook(outfile)
+        self.write_excel_readme(workbook)
+        self.write_excel_mois(workbook)
+        self.write_excel_data(workbook)
         workbook.close()
 
