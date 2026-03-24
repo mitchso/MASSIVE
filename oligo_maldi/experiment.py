@@ -420,7 +420,7 @@ class Experiment:
 
         return fig, axs
 
-    @deprecated
+    @deprecated("Not being maintained")
     def offset_plot(self, wells: list, xlim=None, title=None, filtered=True) -> plt.axes:
         """
         Takes a list of well IDs and returns a plot of each spectrum stacked vertically.

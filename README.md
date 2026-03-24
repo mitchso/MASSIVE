@@ -39,6 +39,7 @@ i.e.
 ...
 ```
 
+See /data for example files.
 
 # Usage
 Analysis is mainly performed using four objects, Experiment, Sample, Oligo and DataProcessor.

@@ -163,7 +163,7 @@ class Sample:
         plt.plot(x,y)
 
         y_at_cutoff = y[round(self.noise_cutoff*len(y))]
-        plt.text(x=self.noise_cutoff*100, y=y_at_cutoff+1, s=f" {self.noise}")
+        # plt.text(x=self.noise_cutoff*100, y=y_at_cutoff+1, s=f" {self.noise}")
 
         plt.xlim(50, 100)
         # plt.xticks(np.linspace(50, 100, num=6))
