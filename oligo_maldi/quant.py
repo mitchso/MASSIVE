@@ -87,18 +87,22 @@ class DataProcessor:
         self.data_replicates_averaged = self.collapse_replicates(self.data_mois_collapsed, attributes)
         self.data_as_percentage = self.convert_to_percentage(self.data_replicates_averaged)
 
+        # collect dataframes
+        self.dfs = {'ungrouped': self.data_ungrouped,
+                    'mois_collapsed': self.data_mois_collapsed,
+                    'replicates_averaged': self.data_replicates_averaged,
+                    'percentage': self.data_as_percentage}
+
         # add activity scores
         if activity_scoring_function:
             self.data_as_percentage = self.add_activity_scores()
             self.final_activity_sums = self.sum_activities()
             self.evolvepro_formatted = self.format_for_evolvepro()
 
-        self.dfs = {'ungrouped': self.data_ungrouped,
-                    'mois_collapsed': self.data_mois_collapsed,
-                    'replicates_averaged': self.data_replicates_averaged,
-                    'percentage': self.data_as_percentage,
-                    'activity_sums': self.final_activity_sums,
-                    'evolvepro': self.evolvepro_formatted}
+            self.dfs['activity_sums'] = self.final_activity_sums
+            self.dfs['evolvepro'] = self.evolvepro_formatted
+
+
 
     def collapse_input_dataframes(self) -> pd.DataFrame:
         """All dataframes from self.dataframes will now be in self.data_ungrouped,
@@ -137,7 +141,8 @@ class DataProcessor:
         for old_keys in mapping_dict.values():  # remove all the old_keys from the new dict
             new_df.drop(columns=old_keys, inplace=True)
 
-        new_df.drop(columns=self.excluded_mois, inplace=True, errors='raise')
+        if self.excluded_mois:
+            new_df.drop(columns=self.excluded_mois, inplace=True, errors='raise')
 
         return new_df
 
