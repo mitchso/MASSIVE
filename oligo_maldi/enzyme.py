@@ -25,3 +25,17 @@ class Enzyme(object):
             return 0
         except TypeError:   # happens if self.mutation is None
             return None
+
+    @staticmethod
+    def default_activity_score(unreacted: float, correct: float, a1=1, a2=5, b1=2, b2=2):
+        """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+        if unreacted == 1:
+            score = 0
+
+        else:
+            reacted = 1 - unreacted
+            correctness = correct / reacted
+
+            score = (a1 * reacted**b1 + a2 * correctness**b2) / (a1 + a2)
+
+        return score

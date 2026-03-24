@@ -5,6 +5,10 @@ import matplotlib.ticker as ticker
 import numpy as np
 import warnings
 import sys
+import os
+from collections.abc import Callable
+import xlsxwriter
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
@@ -47,7 +51,11 @@ class DataProcessor:
     """
     def __init__(self, dataframes: dict,    #
                  attributes: list,
-                 collapse_mois: dict | None = None):
+                 exclude_mois: list = None,
+                 collapse_mois: dict | None = None,
+                 activity_scoring_function: Callable = None,
+                 activity_scoring_df_variables: dict = None,
+                 activity_scoring_other_variables: dict = None):
 
         """
 
@@ -66,12 +74,33 @@ class DataProcessor:
         """
 
         self.dataframes = dataframes
+        self.attributes = attributes
+        self.excluded_mois = exclude_mois
+
+        self.activity_scoring_function = activity_scoring_function
+        self.activity_scoring_df_variables = activity_scoring_df_variables
+        self.activity_scoring_other_variables = activity_scoring_other_variables
+
+        # process data
         self.data_ungrouped = self.collapse_input_dataframes()
         self.data_mois_collapsed = self.collapse_mois(df=self.data_ungrouped, mapping_dict=collapse_mois)
         self.data_replicates_averaged = self.collapse_replicates(self.data_mois_collapsed, attributes)
-        self.data_activity_scores = None    # TODO, just score in the dataframe nothing else
+        self.data_as_percentage = self.convert_to_percentage(self.data_replicates_averaged)
 
-    def collapse_input_dataframes(self):
+        # add activity scores
+        if activity_scoring_function:
+            self.data_as_percentage = self.add_activity_scores()
+            self.final_activity_sums = self.sum_activities()
+            self.evolvepro_formatted = self.format_for_evolvepro()
+
+        self.dfs = {'ungrouped': self.data_ungrouped,
+                    'mois_collapsed': self.data_mois_collapsed,
+                    'replicates_averaged': self.data_replicates_averaged,
+                    'percentage': self.data_as_percentage,
+                    'activity_sums': self.final_activity_sums,
+                    'evolvepro': self.evolvepro_formatted}
+
+    def collapse_input_dataframes(self) -> pd.DataFrame:
         """All dataframes from self.dataframes will now be in self.data_ungrouped,
         with an additional column "source" referencing the name of the original dataframe"""
 
@@ -108,28 +137,92 @@ class DataProcessor:
         for old_keys in mapping_dict.values():  # remove all the old_keys from the new dict
             new_df.drop(columns=old_keys, inplace=True)
 
+        new_df.drop(columns=self.excluded_mois, inplace=True, errors='raise')
+
         return new_df
 
-    def collapse_replicates(self, df: pd.DataFrame, attributes: list):
+    def collapse_replicates(self, df: pd.DataFrame, attributes: list) -> pd.DataFrame:
         """Averages technical replicates into average values.
         Requires a list of attributes that should be shared across all replicates."""
-        return df.groupby(attributes).mean(numeric_only=True)
+        try:
+            new_df = df.groupby(attributes).mean(numeric_only=True)
+            new_df.reset_index(inplace=True)
+            return new_df
+        except KeyError:
+            print(f"Failed attempting to group dataframe by attributes. Double check that each attribute matches a column header.")
 
-    def activity_score(self):
+    def convert_to_percentage(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Converts MOIs in each row to a percentage of total rather than absolute values."""
+
+        labels_to_remove = self.attributes + ['chip', 'background', 'mz_offset', 'noise', 'noise_cutoff']
+
+        #this df contains only numerical values
+        df_for_summing = df.drop(labels=labels_to_remove, axis='columns', inplace=False, errors='raise')
+        row_totals = df_for_summing.sum(numeric_only=True, axis='columns')
+        df_percentage = df_for_summing.div(row_totals, axis='rows')
+
+        # combine the categorical labels of the original dataframe with the percentage data of the new dataframe
+        df_final = df[self.attributes].join(df_percentage)
+
+        return df_final
+
+    def add_activity_scores(self) -> pd.DataFrame:
         """
-        Score must be >0 if the enzyme does something
-        Going slower but being highly specific is better
-        All nonspecific products can be scored the same
-
-        + for desired product
-        reacted substrate = 1 - unreacted substrate
-
-
-        :return:
+        Adds a column to the dataframe self.data_as_percentage which is the score for that row.
+        Uses    self.activity_scoring_function,
+                self.activity_scoring_df_variables,
+                self.activity_scoring_other_variables
         """
 
-        return 0
+        new_df = self.data_as_percentage.copy()
+        scores = []
+        for index, row in new_df.iterrows():
+            # collect values from df
+            df_dict = {}
+            for k, v in self.activity_scoring_df_variables.items():
+                df_dict[k] = row[v]
+            score = self.activity_scoring_function(**df_dict, **self.activity_scoring_other_variables)
+            scores.append(score)
+        new_df['activity_score'] = scores
 
+        return new_df
+
+    def sum_activities(self) -> pd.DataFrame:
+        new_df = self.data_as_percentage.copy()[['enz_id','enz_mutation','activity_score']]
+        df_summed = new_df.groupby(['enz_id', 'enz_mutation'])['activity_score'].sum().reset_index()
+        return df_summed
+
+    def format_for_evolvepro(self) -> pd.DataFrame:
+        old_df = self.final_activity_sums.copy()
+        old_df.loc[old_df['enz_mutation'] == 'WT', 'enz_mutation'] = 'A82S'
+        old_df.loc[old_df['enz_mutation'] == 'Base (S82A)', 'enz_mutation'] = 'WT'
+        rows_to_drop = old_df[old_df['enz_mutation'] == 'No enzyme'].index
+        old_df = old_df.drop(rows_to_drop)
+        old_df.reset_index(inplace=True)
+
+        new_df = pd.DataFrame()
+        new_df['Variant'] = old_df['enz_mutation'].str[1:]
+        new_df.loc[new_df['Variant'] == 'T', 'Variant'] = 'WT'  # fixes the WT from getting messed up from the above operation
+        new_df['activity'] = old_df['activity_score']
+        new_df.sort_values(by=['activity'], inplace=True, ascending=False)
+
+        return new_df
+
+    def sort_sample_labels(self,
+                           df_name: str,
+                           label_category: str,
+                           sort_by: list | str,
+                           global_var: tuple | None = None,
+                           ascending: bool=False) -> list:
+        """General purpose function for returning sample labels in a specific order."""
+
+        df = self.dfs[df_name].copy()
+
+        if global_var:
+            df = df.loc[df[global_var[0]] == global_var[1]]  # take the slice that corresponds to global_var
+
+        df = df.sort_values(by=sort_by, ascending=ascending, inplace=False)
+        return list(df[label_category])
 
     def full_figure(self):
 
@@ -170,7 +263,7 @@ class DataProcessor:
             wells = label_info['wells']
             cols = y_labels
 
-            rows = df.loc[df['source'] == source] # slice only the correct source plate
+            rows = df.loc[df['source'].isin(source)]  # slice only the correct source plate(s)
             rows = rows.loc[df['well'].isin(wells)] #slice only the correct wells for a particular x_label
             rows = rows[cols]   # slice only the columns corresponding to MOIs you want to work with
             rows['total'] = rows.sum(axis=1)    # total ion intensity across all MOIs for a row
@@ -238,10 +331,11 @@ class DataProcessor:
                     y_legend_overwrite: list | None = None, # allows for changing the y_labels
                     sort_by: list | None = None,    # list of MOIs to sort by, in order of priority
                     sort_order: str | None = None, # whether to sort by having the most or the least of each MOI
+                    hide_points: bool = False,
                     figsize=None,
                     title=None,
                     show_legend=True,
-                    ax=None):
+                    ax=None):   # can call this command to generate a standalone figure (ax=None) or to build an ax object inside an existing figure
 
         df = self.data_mois_collapsed   # start with a dataframe where all MOIs are named the same thing
         df = df.loc[df[global_var[0]] == global_var[1]] # take the slice that corresponds to global_var
@@ -256,7 +350,7 @@ class DataProcessor:
         x_wells = {}
         for x_label in x_labels:
             try:
-                source = df.loc[df[x_category] == x_label]['source'].unique()[0]
+                source = df.loc[df[x_category] == x_label]['source'].unique()   # this can be 1 or more plates
             except IndexError:
                 print(f"IndexError: '{x_label}' is not a column in the DataFrame.")
                 sys.exit(0)
@@ -276,7 +370,7 @@ class DataProcessor:
 
         # if an ax is specified when this is called, that implies that a Figure already exists, so only make one if ax is not called
         if not ax:
-            fig, ax = plt.subplots()
+            fig, ax = plt.subplots(figsize=figsize)
 
         ax = self.generate_stacked_bar_ax(ddict=ddict,
                                           y_order=y_species if not y_legend_overwrite else y_legend_overwrite,
@@ -284,30 +378,11 @@ class DataProcessor:
                                           figsize=figsize,
                                           title=title,
                                           show_legend=show_legend,
+                                          hide_points=hide_points,
                                           ax=ax)
         return ax
 
-
-    def generate_stacked_bar_ax(self,
-                                # x_labels: list,
-                                y_order: list,
-                                y_colours: list,
-                                ddict: dict,
-                                figsize: tuple,
-                                title: str,
-                                show_legend: bool,
-                                ax=None) -> plt.axes:
-
-        # Generate plot
-        plt.rcParams.update({'font.family': 'Arial',
-                             'font.size': 13,
-                             'text.color': 'black',
-                             'axes.labelcolor': 'black'})
-
-        sns.set_style('ticks')  # Necessary to see minor ticks
-
-        if not ax:
-            fig, ax = plt.subplots(figsize=figsize)
+    def generate_bar(self, ax: plt.axes, y_order: list, y_colours: list, ddict: dict):
 
         # populate bar chart by calculating means
         x_labels = ddict.keys()
@@ -324,10 +399,11 @@ class DataProcessor:
                    'linewidth': 0.5}
 
             ax.bar(**bar)
-
             bottom = [v1 + v2 for v1, v2 in zip(bottom, avg)]  # update bottom for next bar
 
+    def generate_scatter(self, ax: plt.axes, y_order: list, y_colours: list, ddict: dict):
         # add individual data points as a scatter
+        x_labels = ddict.keys()
         scatter_df = pd.DataFrame(columns=['x', 'moi', 'val'])  # df with 1 row per point to plot
         for x in x_labels:
             bottom = 0
@@ -340,20 +416,50 @@ class DataProcessor:
 
         sns.swarmplot(data=scatter_df, x='x', y='val',
                       hue='moi', palette=y_colours,
-                      linewidth=0.5, size=3,
+                      linewidth=0.5, size=2.5,
                       edgecolor='black', legend=False, clip_on=False, ax=ax)
 
+    def generate_stacked_bar_ax(self,
+                                # x_labels: list,
+                                y_order: list,
+                                y_colours: list,
+                                ddict: dict,
+                                figsize: tuple,
+                                title: str,
+                                show_legend: bool,
+                                hide_points: bool = False,
+                                ax=None) -> plt.axes:
+
+        """
+        Helper function for self.stacked_bar(). This function skips over the data prep, and generates the actual plot.
+        For param descriptions see self.stacked_bar()
+        """
+        self.generate_bar(ax=ax, y_order=y_order, y_colours=y_colours, ddict=ddict)
+
+        if not hide_points:
+            self.generate_scatter(ax=ax, y_order=y_order, y_colours=y_colours, ddict=ddict)
+        else:   # necessary because seaborn and vanilla matplotlib have different spacing defaults
+            ax.set_xlim(-0.5, len(ddict) - 0.5)
+
+        # Formatting
+        plt.rcParams.update({'font.family': 'Arial',
+                             'font.size': 13,
+                             'text.color': 'black',
+                             'axes.labelcolor': 'black'})
+        sns.set_style('ticks')  # Necessary to see minor ticks
+
         # ticks
+        x_labels = ddict.keys()
         ax.set_ylim(0, 1)
         ax.set_yticks(ticks=[0, 0.25, 0.5, 0.75, 1.0], labels=['0%', '25%', '50%', '75%', '100%'])
         ax.set_yticks(ticks=np.linspace(0, 1, num=20, endpoint=False), minor=True)
         ax.yaxis.get_ticklocs(minor=True)
         ax.minorticks_on()
         ax.xaxis.set_tick_params(which='minor', bottom=False)  # turn off x-axis minor ticks
-
         ax.set_xticklabels(labels=x_labels, ha='right', rotation=45)
-        # ax.tick_params(axis='x', labelrotation=45) #, ha='right')
         ax.tick_params(color='black', labelcolor='black')
+
+        # exterior and grid
         for spine in ax.spines.values():
             spine.set_edgecolor('black')
         ax.grid(color='black', axis='y', linewidth=0.5)
@@ -365,380 +471,105 @@ class DataProcessor:
             ax.set_title(title, pad=20)
         if show_legend:
             ax.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left', reverse=True)
-        # plt.tight_layout()
 
         return ax
 
+    def score_bar(self,
+                  x_category,
+                  x_labels: list | None = None, # determines both the species to include and their order
+                  y_species: list = ('ntp', ['G','C','A','T']),
+                  y_colours: list = ["#82cce7", "#e5b5bf", "#aadab4", "#ddcb9c"],
+                  title='Activity score',
+                  ax=None,
+                  show_legend: bool = True):
 
+        """Function only holds for my specific experimental setup because it assumes the score is a certain composite of
+        different nucleotide additions"""
+        plt.rcParams.update({'font.family': 'Arial',
+                             'font.size': 13,
+                             'text.color': 'black',
+                             'axes.labelcolor': 'black'})
 
+        df = self.data_as_percentage
 
-#     def stacked_bar(self,
-#                     x_order: list, x_labels: list,
-#                     y_order: list, y_colours: list, y_labels: list | None = None,
-#                     norm_to: str | None = None, mode: str = 'relative',
-#                     sort_by: str | None | list = None, sort_order: str = 'ascending',
-#                     errorbars: bool = False,
-#                     title: str | None = None,
-#                     figsize=None) -> plt.axes:
-#         """
-#         :param df: dataframe, must contain all wells (rows) from x_order and all columns from y_order
-#         :param x_order: nested list of wells to include, in the desired order on the x-axis
-#         :param x_labels: categorical x-axis labels
-#         :param y_order: list of columns to include, in the desired order on the y-axis (bottom to top)
-#         :param y_colours: bar colours (bottom to top)
-#         :param y_labels: option to change the labels for the bars
-#         :param norm_to: column that all other columns will be normalized to
-#         :param mode: 'relative' will present data of all columns relative to 'norm_to'.
-#                      'fraction' will present data of all columns as a fraction of 100%.
-#         :param sort_by: designates which MOI to sort the columns by. You can designate 1 as a string,
-#                         or multiple as a list. If multiple, the function will prioritize starting from
-#                         the first, ending at the last.
-#         :param title: option to add a title.
-#         :return: plt.fig, plt.ax
-#         """
-#
-#         # make sure that the correct params are given.
-#         if mode == 'relative':
-#             if norm_to is None:
-#                 raise ValueError("parameter \'norm_to\' must be provided if mode is \'relative\'")
-#
-#         # pull rows that correspond to wells
-#         df_slice = pd.DataFrame()  # creates an empty dataframe to populate
-#         wells = sum(x_order, [])  # creates a list of all wells needed
-#         for well in wells:
-#             row = self.data_ungrouped.loc[self.data_ungrouped.well == well]
-#             df_slice = pd.concat([df_slice, row])
-#
-#         # create a nested dictionary with arrangement: x_category -> moi -> values and avg
-#         ddict = {}
-#         i = 0
-#         for group in x_order:
-#             if mode == 'fraction':  # All values will be expressed as a percentage of the total signal
-#                 cols = y_order
-#                 rows = df_slice.loc[df_slice['well'].isin(group)][cols]
-#                 rows['total'] = rows.sum(axis=1)
-#                 rows = rows.div(rows['total'], axis=0)
-#
-#             elif mode == 'relative':  # All values will be expressed relative to 'norm_to'
-#                 cols = y_order + [norm_to]
-#                 rows = df_slice.loc[df_slice['well'].isin(group)][cols]
-#                 rows = rows.div(rows[norm_to], axis=0)
-#
-#             else:
-#                 raise ValueError("mode must be \'fraction\' or \'relative\'")
-#
-#             x = x_labels[i]
-#             ddict[x] = {}
-#             for moi in y_order:
-#                 ddict[x][moi] = {}
-#                 ddict[x][moi]['vals'] = list(rows[moi])
-#                 ddict[x][moi]['avg'] = np.average(ddict[x][moi]['vals'])
-#                 ddict[x][moi]['std'] = np.std(ddict[x][moi]['vals'])
-#             i += 1
-#
-#         if sort_by:
-#             if sort_order == 'ascending' or sort_order is None:
-#                 reverse = False
-#             elif sort_order == 'descending':
-#                 reverse = True
-#             else:
-#                 raise ValueError("sort_order must be \'ascending\', \'descending\', or \'None\'")
-#
-#             # First, sort dictionary alphabetically
-#             ddict = {k: v for k, v in sorted(ddict.items(), key=lambda item: item[0])}
-#
-#             # Then, sort dictionary by amino acid position
-#             ddict = {k: v for k, v in sorted(ddict.items(), key=lambda item: get_aa_position(item[0]))}
-#
-#             # check if it's sorting on a single MOI, if it is, put it in a list to standardize next step
-#             if isinstance(sort_by, str):
-#                 sort_by = [sort_by]
-#
-#             # if it's multiple MOIs, reverse them so you sort by the lowest priority first
-#             # this results in a final order that prioritizes the first item in sort_by
-#             elif isinstance(sort_by, list):
-#                 sort_by.reverse()
-#
-#             # Finally, sort dictionary based on the avg value of MOI designated as 'sort_by'
-#             for moi in sort_by:
-#                 ddict = {k: v for k, v in
-#                          sorted(ddict.items(), key=lambda item: item[1][moi]['avg'], reverse=reverse)}
-#
-#             # Update labels to reflect the sorting
-#             x_labels = [k for k in ddict.keys()]
-#
-#         # Generate plot
-#         plt.rcParams.update({'font.family': 'Arial',
-#                              'font.size': 13,
-#                              'text.color': 'black',
-#                              'axes.labelcolor': 'black'})
-#
-#         sns.set_style('ticks')  # Necessary to see minor ticks
-#
-#         fig, ax = plt.subplots(figsize=figsize)
-#
-#         # populate bar chart by calculating means
-#         bottom = [0] * len(x_labels)  # starting point for the bar
-#         for i, moi in enumerate(y_order):
-#             if y_labels:
-#                 label = y_labels[i]
-#             else:
-#                 label = moi
-#             avg = [ddict[x][moi]['avg'] for x in x_labels]
-#             std = [ddict[x][moi]['std'] for x in x_labels]
-#
-#             bar = {'x': x_labels,
-#                    'height': avg,
-#                    'bottom': bottom,
-#                    'label': label,
-#                    'color': y_colours[i],
-#                    'edgecolor': 'black',
-#                    'linewidth': 0.5}
-#
-#             if errorbars:
-#                 bar['yerr'] = std  # default error bars are 1 standard deviation
-#                 bar['capsize'] = 3
-#
-#             plt.bar(**bar)
-#
-#             bottom = [v1 + v2 for v1, v2 in zip(bottom, avg)]  # update bottom for next bar
-#
-#         # add individual data points as a scatter
-#         scatter_df = pd.DataFrame(columns=['x', 'moi', 'val'])  # df with 1 row per point to plot
-#         for x in x_labels:
-#             bottom = 0
-#             for moi in y_order:
-#                 vals = ddict[x][moi]['vals']
-#                 vals = [v + bottom for v in vals]
-#                 bottom = bottom + ddict[x][moi]['avg']
-#                 entry = pd.DataFrame({'x': x, 'moi': moi, 'val': vals})
-#                 scatter_df = pd.concat([scatter_df, entry], ignore_index=True)
-#
-#         sns.swarmplot(data=scatter_df, x='x', y='val',
-#                       hue='moi', palette=y_colours,
-#                       linewidth=0.5, size=3,
-#                       edgecolor='black', legend=False, clip_on=False)
-#
-#         # ticks
-#         if mode == 'fraction':
-#             plt.ylim(0, 1)
-#             plt.yticks(ticks=[0, 0.25, 0.5, 0.75, 1.0], labels=['0%', '25%', '50%', '75%', '100%'])
-#             plt.yticks(ticks=np.linspace(0, 1, num=20, endpoint=False), minor=True)
-#             ax.yaxis.get_ticklocs(minor=True)
-#             ax.minorticks_on()
-#             ax.xaxis.set_tick_params(which='minor', bottom=False)  # turn off x-axis minor ticks
-#
-#         plt.xticks(rotation=45, ha='right')
-#         ax.tick_params(color='black', labelcolor='black')
-#         for spine in ax.spines.values():
-#             spine.set_edgecolor('black')
-#         plt.grid(color='black', axis='y', linewidth=0.5)
-#
-#         # labels, legend, title
-#         plt.xlabel('')
-#         plt.ylabel('Signal intensity (au)')
-#         if title:
-#             plt.title(title, pad=20)
-#
-#         plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left', reverse=True)
-#         # plt.tight_layout()
-#
-#         return fig, ax
-#
-#
-#
-# def group_constructor(rows, cols, groups, group_by: str='column'):
-#     """Creates a dictionary.
-#         Keys = groups
-#         Values = lists of wells associated with group.
-#          Wells are grouped by column"""
-#     d = {}
-#
-#     for i, g in enumerate(groups):
-#         if group_by == 'column':
-#             wells = [row + str(cols[i]) for row in rows]
-#         elif group_by == 'row':
-#             wells = [rows[i] + str(col) for col in cols]
-#         else:
-#             raise ValueError("group_by must be row or column")
-#
-#         d[g] = wells
-#
-#
-#     return d
-#
+        if x_labels is None:
+            x_labels = list(df[x_category].unique())
 
-#
-#
-# def stacked_bar(df,
-#                 x_order: list, x_labels: list,
-#                 y_order: list, y_colours: list, y_labels: list | None=None,
-#                 norm_to: str | None = None, mode: str = 'relative',
-#                 sort_by: str | None | list = None, sort_order: str = 'ascending',
-#                 errorbars: bool = False,
-#                 title: str | None = None,
-#                 figsize = None) -> plt.axes:
-#     """
-#     :param df: dataframe, must contain all wells (rows) from x_order and all columns from y_order
-#     :param x_order: nested list of wells to include, in the desired order on the x-axis
-#     :param x_labels: categorical x-axis labels
-#     :param y_order: list of columns to include, in the desired order on the y-axis (bottom to top)
-#     :param y_colours: bar colours (bottom to top)
-#     :param y_labels: option to change the labels for the bars
-#     :param norm_to: column that all other columns will be normalized to
-#     :param mode: 'relative' will present data of all columns relative to 'norm_to'.
-#                  'fraction' will present data of all columns as a fraction of 100%.
-#     :param sort_by: designates which MOI to sort the columns by. You can designate 1 as a string,
-#                     or multiple as a list. If multiple, the function will prioritize starting from
-#                     the first, ending at the last.
-#     :param title: option to add a title.
-#     :return: plt.fig, plt.ax
-#     """
-#
-#     # make sure that the correct params are given.
-#     if mode == 'relative':
-#         if norm_to is None:
-#             raise ValueError("parameter \'norm_to\' must be provided if mode is \'relative\'")
-#
-#     # pull rows that correspond to wells
-#     df_slice = pd.DataFrame()   # creates an empty dataframe to populate
-#     wells = sum(x_order, [])    # creates a list of all wells needed
-#     for well in wells:
-#         row = df.loc[df.well == well]
-#         df_slice = pd.concat([df_slice, row])
-#
-#     # create a nested dictionary with arrangement: x_category -> moi -> values and avg
-#     ddict = {}
-#     i = 0
-#     for group in x_order:
-#         if mode == 'fraction':  # All values will be expressed as a percentage of the total signal
-#             cols = y_order
-#             rows = df_slice.loc[df_slice['well'].isin(group)][cols]
-#             rows['total'] = rows.sum(axis=1)
-#             rows = rows.div(rows['total'], axis=0)
-#
-#         elif mode == 'relative':    # All values will be expressed relative to 'norm_to'
-#             cols = y_order + [norm_to]
-#             rows = df_slice.loc[df_slice['well'].isin(group)][cols]
-#             rows = rows.div(rows[norm_to], axis=0)
-#
-#         else:
-#             raise ValueError("mode must be \'fraction\' or \'relative\'")
-#
-#         x = x_labels[i]
-#         ddict[x] = {}
-#         for moi in y_order:
-#             ddict[x][moi] = {}
-#             ddict[x][moi]['vals'] = list(rows[moi])
-#             ddict[x][moi]['avg'] = np.average(ddict[x][moi]['vals'])
-#             ddict[x][moi]['std'] = np.std(ddict[x][moi]['vals'])
-#         i += 1
-#
-#     if sort_by:
-#         if sort_order == 'ascending' or sort_order is None:
-#             reverse = False
-#         elif sort_order == 'descending':
-#             reverse = True
-#         else:
-#             raise ValueError("sort_order must be \'ascending\', \'descending\', or \'None\'")
-#
-#         # First, sort dictionary alphabetically
-#         ddict = {k: v for k, v in sorted(ddict.items(), key=lambda item: item[0])}
-#
-#         # Then, sort dictionary by amino acid position
-#         ddict = {k: v for k, v in sorted(ddict.items(), key=lambda item: get_aa_position(item[0]))}
-#
-#         # check if it's sorting on a single MOI, if it is, put it in a list to standardize next step
-#         if isinstance(sort_by, str):
-#             sort_by = [sort_by]
-#
-#         # if it's multiple MOIs, reverse them so you sort by the lowest priority first
-#         # this results in a final order that prioritizes the first item in sort_by
-#         elif isinstance(sort_by, list):
-#             sort_by.reverse()
-#
-#         # Finally, sort dictionary based on the avg value of MOI designated as 'sort_by'
-#         for moi in sort_by:
-#             ddict = {k: v for k, v in sorted(ddict.items(), key=lambda item: item[1][moi]['avg'], reverse=reverse)}
-#
-#         # Update labels to reflect the sorting
-#         x_labels = [k for k in ddict.keys()]
-#
-#     # Generate plot
-#     plt.rcParams.update({'font.family': 'Arial',
-#                          'font.size': 13,
-#                          'text.color': 'black',
-#                          'axes.labelcolor': 'black'})
-#
-#     sns.set_style('ticks')  # Necessary to see minor ticks
-#
-#     fig, ax = plt.subplots(figsize=figsize)
-#
-#     # populate bar chart by calculating means
-#     bottom = [0] * len(x_labels)    # starting point for the bar
-#     for i, moi in enumerate(y_order):
-#         if y_labels:
-#             label = y_labels[i]
-#         else:
-#             label = moi
-#         avg = [ddict[x][moi]['avg'] for x in x_labels]
-#         std = [ddict[x][moi]['std'] for x in x_labels]
-#
-#         bar = {'x': x_labels,
-#                'height': avg,
-#                'bottom': bottom,
-#                'label': label,
-#                'color': y_colours[i],
-#                'edgecolor': 'black',
-#                'linewidth': 0.5}
-#
-#         if errorbars:
-#             bar['yerr'] = std   # default error bars are 1 standard deviation
-#             bar['capsize'] = 3
-#
-#         plt.bar(**bar)
-#
-#         bottom = [v1 + v2 for v1, v2 in zip(bottom, avg)]   # update bottom for next bar
-#
-#     # add individual data points as a scatter
-#     scatter_df = pd.DataFrame(columns=['x', 'moi', 'val'])  # df with 1 row per point to plot
-#     for x in x_labels:
-#         bottom = 0
-#         for moi in y_order:
-#             vals = ddict[x][moi]['vals']
-#             vals = [v + bottom for v in vals]
-#             bottom = bottom + ddict[x][moi]['avg']
-#             entry = pd.DataFrame({'x': x, 'moi': moi, 'val': vals})
-#             scatter_df = pd.concat([scatter_df, entry], ignore_index=True)
-#
-#     sns.swarmplot(data=scatter_df, x='x', y='val',
-#                   hue='moi', palette=y_colours,
-#                   linewidth=0.5, size=3,
-#                   edgecolor='black', legend=False, clip_on=False)
-#
-#     # ticks
-#     if mode == 'fraction':
-#         plt.ylim(0, 1)
-#         plt.yticks(ticks=[0, 0.25, 0.5, 0.75, 1.0], labels=['0%', '25%', '50%', '75%', '100%'])
-#         plt.yticks(ticks=np.linspace(0, 1, num=20, endpoint=False), minor=True)
-#         ax.yaxis.get_ticklocs(minor=True)
-#         ax.minorticks_on()
-#         ax.xaxis.set_tick_params(which='minor', bottom=False)   # turn off x-axis minor ticks
-#
-#     plt.xticks(rotation=45, ha='right')
-#     ax.tick_params(color='black', labelcolor='black')
-#     for spine in ax.spines.values():
-#         spine.set_edgecolor('black')
-#     plt.grid(color='black', axis='y', linewidth=0.5)
-#
-#     #labels, legend, title
-#     plt.xlabel('')
-#     plt.ylabel('Signal intensity (au)')
-#     if title:
-#         plt.title(title, pad=20)
-#
-#     plt.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left', reverse=True)
-#     # plt.tight_layout()
-#
-#     return fig, ax
+        if ax is None:
+            fig, ax = plt.subplots()
 
+        ddict = {}
+        for label in x_labels:
+            ddict[label] = {}
+            df_slice = df[df[x_category] == label]  # slice to correspond to x_label
+
+            for y in y_species[1]:
+                df_slice_slice = df_slice[df[y_species[0]] == y]    # slice to correspond to correct nucleotide
+                ddict[label][y] = float(df_slice_slice['activity_score'])
+
+        bottom = [0] * len(x_labels)  # starting point for the bar
+        for i, y in enumerate(y_species[1]):
+            height = [ddict[x][y] for x in x_labels]
+
+            bar = {'x': x_labels,
+                   'height': height,
+                   'bottom': bottom,
+                   'label': y,
+                   'color': y_colours[i],
+                   'edgecolor': 'black',
+                   'linewidth': 0.5}
+
+            ax.bar(**bar)
+            for i, h in enumerate(height):
+                if h < 0.3:
+                    continue
+                else:
+                    ax.text(x=i, y=h/2 + bottom[i], s=y, ha='center', va='center', fontsize=10, color='black')
+            bottom = [v1 + v2 for v1, v2 in zip(bottom, height)]  # update bottom for next bar
+
+        # ticks
+        ax.set_xlim(-0.5, len(x_labels)-0.5)    # for some reason this is necessary to get the same alignment as self.stacked_bar
+        # ax.set_ylim(0, 4)
+        # ax.set_yticks(ticks=[0, 1, 2, 3, 4])
+        # ax.set_yticks(ticks=np.linspace(0, 4, num=20, endpoint=False), minor=True)
+        ax.yaxis.get_ticklocs(minor=True)
+        ax.minorticks_on()
+        ax.xaxis.set_tick_params(which='minor', bottom=False)  # turn off x-axis minor ticks
+        ax.set_xticklabels(labels=x_labels, ha='right', rotation=45)
+        ax.tick_params(color='black', labelcolor='black')
+
+        # exterior and grid
+        for spine in ax.spines.values():
+            spine.set_edgecolor('black')
+        ax.grid(color='black', axis='y', linewidth=0.5)
+
+        # labels, legend, title
+        ax.set_xlabel('')
+        ax.set_ylabel('Activity score')
+        if title:
+            ax.set_title(title, pad=20)
+        if show_legend:
+            ax.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
+
+        return ax
+
+    def write_to_excel(self, filename: str, overwrite=False) -> None:
+        """
+        Writes all dataframes to an excel file.
+        """
+
+        # create file
+        outfile = filename if filename.endswith(".xlsx") else filename + ".xlsx"
+
+        if not overwrite:
+            if os.path.exists(outfile):
+                print(f"\'write_to_excel()\' did not execute because the file already exists.\n"
+                      f"To proceed anyway, use parameter \'overwrite=True\'.")
+                return
+
+        writer = pd.ExcelWriter(path=outfile, engine='xlsxwriter')
+
+        for k, v in self.dfs.items():
+            v.to_excel(writer, sheet_name=k, index=False)
+
+        writer.close()

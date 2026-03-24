@@ -12,6 +12,7 @@ import threading
 from .sample import Sample
 from .helper import *
 from warnings import deprecated
+from scipy.signal import find_peaks
 import random
 
 
@@ -298,7 +299,7 @@ class Experiment:
         return fig, ax
 
     def stacked_plot(self, wells: list, xlim=None, title=None, filtered=False, figsize=None,
-                     label=True, label_first_only=True, overlay=False, hide_excluded=True) -> plt.axes:
+                     label=True, label_first_only=True, overlay=False, hide_excluded=True, label_peaks=False) -> plt.axes:
         """
         Takes a list of well IDs and returns a plot of each spectrum stacked vertically.
 
@@ -351,6 +352,28 @@ class Experiment:
             except TypeError:
                 axis = axs
 
+            if label_peaks:
+                label = False   # turn of MOI species labels
+                plt.subplots_adjust(hspace=0.5) # add some extra space between plots
+                peaks, _ = find_peaks(i_plot, height=20)    # simple peak finding algorithm, only detects peaks >20% max signal
+                for i, peak in enumerate(peaks):
+                    try:    # catches an error that occurs when checking the final peak in the list
+                        if peaks[i + 1] - peaks[i] < 5: # skip peaks that are less than 5 daltons separated
+                            plot_peak = False
+                        else:
+                            plot_peak = True
+
+                    except IndexError:
+                        plot_peak = True
+
+                    if plot_peak:
+                        axis.plot(mz_plot[peak], i_plot[peak], 'x', color='black')
+                        axis.vlines(mz_plot[peak], ymin=-9, ymax=i_plot[peak], colors='grey')
+                        axis.text(x=mz_plot[peak], y=i_plot[peak] + 10, s=str(int(round(mz_plot[peak], 0))),
+                                  horizontalalignment='center', rotation=75, verticalalignment='bottom',
+                                  fontsize=10)
+
+
             axis.plot(mz_plot, i_plot, linewidth=1.5)
             axis.set_ylim(-10, 150)
             axis.set_xlim(min(mz_plot), max(mz_plot))
@@ -392,8 +415,8 @@ class Experiment:
 
         if title:
             plt.suptitle(title)
-        plt.tight_layout()
-        plt.subplots_adjust(wspace=0, hspace=0)
+        # plt.tight_layout()
+        # plt.subplots_adjust(wspace=0, hspace=0)
 
         return fig, axs
 
@@ -759,8 +782,6 @@ class Experiment:
                     except KeyError:
                         worksheet.write(i, j, "n/a")  # if no data exists for this header, write n/a
                 i += 1
-
-
 
     def write_to_excel(self, filename: str, overwrite=False) -> None:
         """
