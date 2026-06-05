@@ -1,15 +1,16 @@
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
 import numpy as np
+from warnings import deprecated
+from scipy.signal import find_peaks
+from scipy.signal import savgol_filter
 from . import oligo
 from . import enzyme
-from warnings import deprecated
 
 
 class Sample:
     def __init__(self, file, well, mz, i, noise_cutoff: float, chip=0, mz_offset=0):
+        self.file = file  # source data file
         self.chip = chip    # for AnchorChip plates, chip=0 refers to regular sample spots and chip=1 refers to calibrant spots
-        self.file = file    # source data file
         self.well = well
         self.name = self.well   # default naming but this can be changed
         self.noise_cutoff = noise_cutoff
@@ -47,6 +48,30 @@ class Sample:
     def recalc_mz(self):
         """Updates self.mz, useful when mz_offset has been changed."""
         self.mz = [point + self.mz_offset for point in self.mz_raw]
+
+    def collect_attributes(self):
+        """
+        Collects all attributes of the Sample object and returns them as a dictionary.
+        Excludes attributes that are only meant to be seen internally.
+        """
+        include = ['file', 'chip', 'well', 'name', 'noise_cutoff', 'mz_offset', 'background', 'noise']
+        exclude = ['misc_conditions', 'mois', 'mz_raw', 'mz', 'i', 'i_bg_subtracted', 'i_filtered', 'total_ion',
+                   'max_i', 'num_points']
+
+        attrs = {}
+
+        for key in include: # first, add essential attributes, important for ordering
+            attrs[key] = getattr(self, key)
+
+        for k, v in self.__dict__.items():  # then iterate through all attributes
+            if k in include:
+                pass    # already added
+            elif k not in exclude:
+                attrs[k] = v
+
+        return attrs
+
+
 
     def misc_conditions_to_attributes(self):
         """Converts the misc_conditions dictionary to attributes."""
@@ -106,6 +131,12 @@ class Sample:
                 i_filtered.append(0)
 
         self.i_filtered = i_filtered
+
+    def savitzky_golay(self, i=None, window=15, polyorder=3):
+        if i is None:   # allows for smoothing on spectra that have been processed in other ways as well
+            i = self.i
+
+        return savgol_filter(i, window_length=window, polyorder=polyorder)
 
     def plot_distance_between_points(self) -> plt.axes:
         """
@@ -181,7 +212,7 @@ class Sample:
         """
         Generates a plot for an MOI, zoomed in to visualize the isotope distribution and mass accuracy.
         """
-        return self.plot(xlim=moi.iso_dist_range(),
+        return self.plot(xlim=moi.iso_dist_range,
                          relative=True,
                          theoretical_dist=True,
                          filtered=filtered,
@@ -197,7 +228,11 @@ class Sample:
             label_mois=False,
             filtered=False,
             bg_subtracted=False,
-            title=None
+            smoothed=False,
+            range_of_interest=False,
+            title=None,
+            colour='#00798c',
+            ax=None,
     ) -> plt.axes:
 
         """
@@ -214,7 +249,6 @@ class Sample:
         if filtered:  # Choose filtered or raw values
             i_plot = self.i_filtered
 
-
         if xlim:    # Adjust x axis limits
             mz_plot, i_plot = self.slice_spectrum(start=xlim[0], end=xlim[1], mz=mz_plot, i=i_plot)
         else:
@@ -227,46 +261,51 @@ class Sample:
             except ZeroDivisionError:  # occurs when all i values are 0
                 pass
 
+
+        if ax is None:
+            plt.style.use('default')
+            fig, ax = plt.subplots(figsize=(8, 3))
+
         # Base plot
-        plt.style.use('default')
-        fig, ax = plt.subplots(figsize=(8, 3))
-        plt.plot(mz_plot, i_plot, label=f'Exp data', c='#00798c', linewidth=1)
+        ax.plot(mz_plot, i_plot, label=f'Exp data', c=colour, linewidth=1, zorder=10)
 
         if label_peaks:  # Label peaks
             peak_indices = self.call_peaks(i_plot)
             peak_x = [mz_plot[x] for x in peak_indices]
             peak_y = [i_plot[x] for x in peak_indices]
-            plt.scatter(peak_x, peak_y, color='red', marker='x', s=2)
+            ax.scatter(peak_x, peak_y, color='red', marker='x', s=2)
 
             for x, y in zip(peak_x, peak_y):
-                plt.annotate(f'{round(x)}', (x, y*1.02), ha='center')
+                ax.annotate(f'{round(x)}', (x, y*1.02), ha='center')
 
         if theoretical_dist:   # Overlay theoretical isotope distributions
             for moi in self.mois:
-                moi.iso_dist_plot(y_max=max(i_plot), standalone=False)
-                plt.plot(moi.iso_dist_range(),  # x1, x2
-                         [(max(i_plot)+1)/10]*2,    # y1, y2 (both values will be max(i_plot)+1/10
-                         label='Range of interest', c='#edae49', marker='.', markersize=10)
+                moi.iso_dist_plot(y_max=max(i_plot), standalone=False, colour='#CC6677')
+
+                if range_of_interest:
+                    ax.plot(moi.iso_dist_range,  # x1, x2
+                            [(max(i_plot)+1)/10] * 2,  # y1, y2 (both values will be max(i_plot)+1/10
+                            label='Range of interest', marker='.', markersize=10)
 
         if label_mois:  # Add indicators for each MOI
             for moi in self.mois:
                 xy = moi.monoisotopic_mass, moi.mai_intensity(sample=self) + 0.1 * max(i_plot)
-                plt.annotate(text=f"{moi.name}", xy=xy, rotation=0, ha='center')
+                ax.annotate(text=f"{moi.name}", xy=xy, rotation=0, ha='center')
 
         # Formatting
         ymax = round(max(i_plot) * 1.2 + 1)  # +1 accounts for possibly all 0 values
         default_title = f'Sample: {self.well}'
 
-        plt.ylim(0, ymax)
-        plt.xlim(xlim[0], xlim[1])
-        plt.title(default_title) if title is None else plt.title(title)
-        plt.ylabel(f'Relative intensity (au)') if relative else plt.ylabel(f'Ion count')
-        plt.xlabel('m/z')
+        ax.set_ylim(0, ymax)
+        ax.set_xlim(xlim[0], xlim[1])
+        ax.set_title(default_title) if title is None else plt.title(title)
+        ax.set_ylabel(f'Relative intensity (au)') if relative else plt.ylabel(f'Ion count')
+        ax.set_xlabel('m/z')
 
         # Create a legend
         handles, labels = plt.gca().get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
         plt.legend(by_label.values(), by_label.keys())
 
-        return fig, ax
+        return ax
 

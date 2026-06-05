@@ -1,13 +1,13 @@
 import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 import numpy as np
 import warnings
 import sys
 import os
 from collections.abc import Callable
-import xlsxwriter
+# import matplotlib.ticker as ticker
+# import xlsxwriter
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
@@ -96,11 +96,14 @@ class DataProcessor:
         # add activity scores
         if activity_scoring_function:
             self.data_as_percentage = self.add_activity_scores()
-            self.final_activity_sums = self.sum_activities()
+            self.dfs['percentage'] = self.data_as_percentage    #update dict
+
+            # self.final_activity_sums = self.sum_activities()
+            self.final_activity_sums = self.sum_scores()
             self.evolvepro_formatted = self.format_for_evolvepro()
 
             self.dfs['activity_sums'] = self.final_activity_sums
-            self.dfs['evolvepro'] = self.evolvepro_formatted
+            # self.dfs['evolvepro'] = self.evolvepro_formatted
 
 
 
@@ -197,6 +200,27 @@ class DataProcessor:
         df_summed = new_df.groupby(['enz_id', 'enz_mutation'])['activity_score'].sum().reset_index()
         return df_summed
 
+
+    def sum_scores(self, group_by=['enz_id', 'enz_mutation'], sum_by='ntp', values='activity_score') -> pd.DataFrame:
+
+        df = self.data_as_percentage.copy()
+
+        pivot_table = (
+            df.groupby(['enz_id', 'enz_mutation'] + [sum_by])[values]
+            .first()
+            .unstack(sum_by)
+            .reset_index()
+        )
+
+        pivot_table.reset_index()
+        pivot_table.columns.name = None
+
+        cols_to_sum = self.data_as_percentage[sum_by].unique()
+
+        pivot_table['sum'] = pivot_table[cols_to_sum].sum(axis=1)
+
+        return pivot_table
+
     def format_for_evolvepro(self) -> pd.DataFrame:
         old_df = self.final_activity_sums.copy()
         old_df.loc[old_df['enz_mutation'] == 'WT', 'enz_mutation'] = 'A82S'
@@ -208,7 +232,7 @@ class DataProcessor:
         new_df = pd.DataFrame()
         new_df['Variant'] = old_df['enz_mutation'].str[1:]
         new_df.loc[new_df['Variant'] == 'T', 'Variant'] = 'WT'  # fixes the WT from getting messed up from the above operation
-        new_df['activity'] = old_df['activity_score']
+        new_df['activity'] = old_df['sum']
         new_df.sort_values(by=['activity'], inplace=True, ascending=False)
 
         return new_df
@@ -224,9 +248,18 @@ class DataProcessor:
         df = self.dfs[df_name].copy()
 
         if global_var:
-            df = df.loc[df[global_var[0]] == global_var[1]]  # take the slice that corresponds to global_var
+            try:
+                df = df.loc[df[global_var[0]] == global_var[1]]  # take the slice that corresponds to global_var
+            except KeyError:
+                print(f"KeyError: '{global_var[0]}' is not a column in the DataFrame.")
+                sys.exit(0)
 
-        df = df.sort_values(by=sort_by, ascending=ascending, inplace=False)
+        try:
+            df = df.sort_values(by=sort_by, ascending=ascending, inplace=False)
+        except:
+            print(f"{sort_by} is not a valid column in the DataFrame.")
+            sys.exit(0)
+
         return list(df[label_category])
 
     def full_figure(self):
@@ -482,7 +515,7 @@ class DataProcessor:
     def score_bar(self,
                   x_category,
                   x_labels: list | None = None, # determines both the species to include and their order
-                  y_species: list = ('ntp', ['G','C','A','T']),
+                  y_species: tuple = ('ntp', ['G','C','A','T']),
                   y_colours: list = ["#82cce7", "#e5b5bf", "#aadab4", "#ddcb9c"],
                   title='Activity score',
                   ax=None,
@@ -542,11 +575,10 @@ class DataProcessor:
         ax.xaxis.set_tick_params(which='minor', bottom=False)  # turn off x-axis minor ticks
         ax.set_xticklabels(labels=x_labels, ha='right', rotation=45)
         ax.tick_params(color='black', labelcolor='black')
-
         # exterior and grid
         for spine in ax.spines.values():
             spine.set_edgecolor('black')
-        ax.grid(color='black', axis='y', linewidth=0.5)
+        ax.grid(color='black', axis='y', linewidth=0.5, which='both')
 
         # labels, legend, title
         ax.set_xlabel('')
@@ -557,6 +589,12 @@ class DataProcessor:
             ax.legend(bbox_to_anchor=(1.05, 1.0), loc='upper left')
 
         return ax
+
+
+    def score_swarm(self):
+
+
+        sns.swarmplot()
 
     def write_to_excel(self, filename: str, overwrite=False) -> None:
         """

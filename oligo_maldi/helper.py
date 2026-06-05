@@ -1,12 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.ticker as tck
 import xml.etree.ElementTree as ET
 from .sample import Sample
 from warnings import deprecated
-from string import ascii_uppercase
-# from oligo_maldi.experiment import Experiment
-
 
 def key_to_enz_code(key:str, enz_rows, enz_cols) -> int:
     """

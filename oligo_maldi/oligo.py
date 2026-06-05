@@ -2,23 +2,27 @@ import matplotlib.pyplot as plt
 from brainpy import isotopic_variants
 
 class Oligo:
-    def __init__(self, seq: str, name=None, five_prime_end='OH', ps_bonds=0, error=0, charge=1):
+    def __init__(self, seq: str, name=None, type='DNA', five_prime_end='OH', ps_bonds=0, error=0, charge=1, custom_mods=None):
         self.name = name
         self.seq = seq
+        self.type = type
         self.fiveprime = five_prime_end
-        self.composition = self.chem_composition(seq, five_prime_end, ps_bonds)
+        self.ps_bonds = ps_bonds
+        self.custom_mods = custom_mods
+        self.composition = self.chem_composition(seq, five_prime_end, ps_bonds, custom_mods)
         self.isotopic_distribution = self.calc_iso_dist(charge=charge, error=error)
+        self.iso_dist_range = self.calc_iso_dist_range()
         self.monoisotopic_mass = self.calc_monoisotopic_mass()
         self.average_mass = self.calc_avg_mass()
         self.charge = charge
 
     def __str__(self):
-        return f"5' ({self.fiveprime[::-1]})-{self.seq} 3'"
+        return self.name
 
     def composition_str(self):
         return " ".join([k + str(v) for k,v in self.composition.items()])
 
-    def chem_composition(self, seq=None, five_prime_end='OH', ps_bonds=0) -> dict:
+    def chem_composition(self, seq=None, five_prime_end='OH', ps_bonds=0, custom_mods:dict=None) -> dict:
         """
         Takes a DNA sequence and returns an elemental composition map.
         """
@@ -48,6 +52,15 @@ class Oligo:
             for k, v in final_comp.items():
                 final_comp[k] += bases[n][k]
 
+        # type adjustment
+        if self.type == 'DNA':
+            pass
+        elif self.type == 'RNA':
+            final_comp['O'] += len(seq)
+            # final_comp['H'] += len(seq)
+        else:
+            raise NotImplementedError("Unexpected Oligo.type")
+
         # Add phosphodiester bonds
         po_bonds = len(seq)-1
         for k, v in final_comp.items():
@@ -60,6 +73,12 @@ class Oligo:
         # Make end adjustments
         for k, v in final_comp.items():
             final_comp[k] += ends[five_prime_end][k]
+
+        # Make custom changes
+        if custom_mods:
+            for k, v in final_comp.items():
+                for mod, change_dict in custom_mods.items():
+                    final_comp[k] += change_dict[k]
 
         return final_comp
 
@@ -87,12 +106,16 @@ class Oligo:
             avg_mass += peak.mz * peak.intensity
         return round(avg_mass, 3)
 
-    def iso_dist_plot(self, y_max=None, standalone=True) -> plt.axes:
+    def iso_dist_plot(self, y_max=None, standalone=True, annotate=True, label='Theoretical', colour=None, cumulative_threshold=0.99999) -> plt.axes:
         x = []
         y = []
+
+        mass_start, mass_end = self.calc_iso_dist_range(cumulative_threshold=cumulative_threshold, left_pad=0, right_pad=0)
+
         for peak in self.isotopic_distribution:
-            x.append(peak.mz)
-            y.append(peak.intensity)
+            if mass_start <= peak.mz <= mass_end:
+                x.append(peak.mz)
+                y.append(peak.intensity)
 
         if y_max:   # if y_max is specified, scale everything to match that.
             scale_factor = y_max / max(y)
@@ -105,17 +128,32 @@ class Oligo:
             plt.title(f'{self.name}', loc='left')
             plt.ylabel(f'Intensity (au)')
             plt.xlabel('m/z')
-            plt.stem(x, y, markerfmt='.', linefmt='#d1495b', label='Theoretical')
+            if colour:
+                linefmt=colour
+            else:
+                linefmt='#d1495b'
+            plt.stem(x, y, markerfmt='.', linefmt=linefmt, label=label)
 
-            for x,y in zip(x, y):
-                plt.annotate(f'{round(x, 2)}', (x, y + 0.025), rotation=90, ha='center')
+            if annotate:
+                for x,y in zip(x, y):
+                    plt.annotate(f'{round(x, 2)}', (x, y + 0.025), rotation=90, ha='center')
 
             return fig, ax
 
         else:   # add a stem plot to existing figure, return nothing
-            plt.stem(x, y, markerfmt='.', linefmt='#d1495b', label='Theoretical')
+            # plt.stem(x, y, markerfmt='.', linefmt='', basefmt='none', label=label)
+            markerline, stemlines, baseline = plt.stem(x, y, markerfmt='.', linefmt='', label=label)
+            if colour:
+                plt.setp(markerline, 'color', colour)
+                plt.setp(stemlines, 'color', colour)
+                plt.setp(baseline, 'color', colour)
+            else:
+                marker_colour = plt.getp(markerline,'color')
+                plt.setp(stemlines, 'color', marker_colour)
+                plt.setp(baseline, 'color', marker_colour)
 
-    def iso_dist_range(self, cumulative_threshold=0.95, left_pad=15, right_pad=15) -> tuple:
+
+    def calc_iso_dist_range(self, cumulative_threshold=0.95, left_pad=10, right_pad=10) -> tuple:
         """
         Calculates the mass range where isotopes of the same molecule may be observed.
 
@@ -156,7 +194,7 @@ class Oligo:
         else:
             raise ValueError("i_type must be raw, bg_sub, or filtered.")
 
-        start, end = self.iso_dist_range()
+        start, end = self.iso_dist_range
         mz = []
         i = []
         for j in range(len(sample.mz)):

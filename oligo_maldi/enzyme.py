@@ -1,4 +1,4 @@
-import pandas as pd
+import math
 
 class Enzyme(object):
     """
@@ -10,6 +10,9 @@ class Enzyme(object):
         self.mutation = mutation    # ie "T47A" or "WT"
         self.round = round  # for directed evolution experiments
         self.organism = organism # derived from?
+
+    def __str__(self):
+        return f"{self.id}, {self.mutation}"
 
     def get_aa_position(self):
         """
@@ -27,7 +30,7 @@ class Enzyme(object):
             return None
 
     @staticmethod
-    def default_activity_score(unreacted: float, correct: float, a1=1, a2=5, b1=2, b2=2):
+    def default_activity_score(unreacted: float, correct: float, a1=1, a2=1, b1=2, b2=2):
         """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
         if unreacted == 1:
             score = 0
@@ -39,3 +42,62 @@ class Enzyme(object):
             score = (a1 * reacted**b1 + a2 * correctness**b2) / (a1 + a2)
 
         return score
+
+    @staticmethod
+    def activity_score_exponential(unreacted: float, correct: float, a1=1, a2=1, b1=2, b2=2):
+        """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+        # TODO: verify implementation
+        reacted = 1 - unreacted
+
+        if unreacted == 1:
+            correctness = 1
+        else:
+            correctness = correct / reacted
+
+        score = math.exp(reacted) + correctness**b2
+
+        return score
+
+    @staticmethod
+    def activity_score_multiplied(unreacted: float, correct: float, a1=1, a2=1, b1=2, b2=2):
+        """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+        # TODO: verify implementation
+        if unreacted == 1:
+            score = 0
+
+        else:
+            reacted = 1 - unreacted
+            correctness = correct / reacted
+
+            score = (reacted**b1 * correctness**b2)
+
+        return score
+
+    @staticmethod
+    def activity_score_r_plus_rc(unreacted: float, correct: float, a1=1, a2=1, b1=1, b2=2):
+        """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+        if unreacted == 1:
+            score = 0
+
+        else:
+            reacted = 1 - unreacted
+            correctness = correct / reacted
+
+            score = (a1 * reacted ** b1 + a2 * reacted * correctness ** b2) / (a1 + a2)
+
+        return score
+
+    @staticmethod
+    def activity_score_c_only(unreacted: float, correct: float, a1=1, a2=1, b1=1, b2=2):
+        """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+        if unreacted == 1:
+            score = 0
+
+        else:
+            reacted = 1 - unreacted
+            correctness = correct / reacted
+
+            score = reacted * correctness
+
+        return score
+
