@@ -1,8 +1,10 @@
-import numpy as np
-import matplotlib.pyplot as plt
-import xml.etree.ElementTree as ET
-from .sample import Sample
-from warnings import deprecated
+from scipy.signal import savgol_filter
+from scipy.signal import find_peaks
+
+
+def savitzky_golay(i: list, window=15, polyorder=3):
+    return savgol_filter(i, window_length=window, polyorder=polyorder)
+
 
 def key_to_enz_code(key:str, enz_rows, enz_cols) -> int:
     """
@@ -25,8 +27,7 @@ def key_to_enz_code(key:str, enz_rows, enz_cols) -> int:
     enz_code = [code for code in row_candidates if code in col_candidates][0]
     return enz_code
 
-
-def key_to_dntp(key:str, dntp_cols, exclude=[]) -> str:
+def key_to_dntp(key:str, dntp_cols, exclude=()) -> str:
     """
     Converts a key to an unambiguous dNTP assignment based on information in the dntp_cols dictionary.
     """
@@ -42,59 +43,106 @@ def key_to_dntp(key:str, dntp_cols, exclude=[]) -> str:
                 break
     return dntp
 
-
-
-
-
-
-
-
-
-
-
-@deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
-def bruker_xml_to_spectra(xml: str):
+def _call_peaks(i_list: list) -> list[int]:
     """
-    Helper function to convert XML files to 'spectra' Elements.
-    This works for data pulled from Bruker TIMS-TOF MALDI2 instrument via the export function
-    in the DataAnalysis software.
+    Uses scipy.signal 'find_peaks' to attempt to call peaks on the graph.
+    Returns index positions of the peaks based on the list of intensity values provided.
     """
-    tree = ET.parse(xml)
-    root = tree.getroot()
-    ms_spectra = root[2][1][1:]
-    return ms_spectra
+    peak_indices, properties = find_peaks(i_list,
+                                          prominence=200,
+                                          height=max(i_list) / 10,
+                                          threshold=max(i_list) / 10,
+                                          distance=100)
 
-@deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
-def spectra_to_samples(spectra: list):
+    return list(peak_indices)
+
+
+def _build_colour_array(x_vals, analyte_ranges, custom_colour_ranges, base_colour, analyte_colour='#d1495b'):
     """
-    Helper function to convert 'spectra' from Bruker XMLs to Sample objects.
+    Returns a per-point colour list the same length as x_vals.
+
+    Priority (lowest → highest):
+        base_colour  →  analyte colour  →  custom colours
     """
 
-    samples = []
-    for s in spectra:
-        well = s.attrib['info'].replace('+MS, ', '')
-        peaks = s[0]
-        mz_list = [float(peak.attrib['mz']) for peak in peaks]
-        intensity_list = [float(peak.attrib['i']) for peak in peaks]
+    # base colour is first applied to everything
+    colour_array = [base_colour] * len(x_vals)
 
-        samples.append(
-            Sample(well=well,
-                   mz=mz_list,
-                   i=intensity_list,
-                   noise_cutoff=0.95)
-        )
+    # for each analyte, apply the default analyte colour
+    for start, end in analyte_ranges:
+        for index, value in enumerate(x_vals):
+            if start <= value <= end:
+                colour_array[index] = analyte_colour
 
-    return samples
+    # for each custom colour range, apply the custom colour
+    for (start, end), custom_colour in custom_colour_ranges.items():
+        for index, value in enumerate(x_vals):
+            if start <= value <= end:
+                colour_array[index] = custom_colour
 
-@deprecated("This was used when working with timsTOF files which were much larger. Unnecessary now.")
-def figsave_fast(fig, filename:str):
-    """This function will save an image ~4x faster than simply calling plt.savefig
-    https://www.scaler.com/topics/matplotlib/save-a-plot-in-matplotlib/
-    https://stackoverflow.com/questions/64789437/what-is-the-difference-between-figure-show-figure-canvas-draw-and-figure-canva
+    return colour_array
+
+
+def _find_colour_segments(colour_array) -> dict:
+    """Takes a colour array and splits it into contiguous segments of the same colour.
+    The keys of the dictionary are the segment boundaries, and the values are the colour."""
+    colour_segments = {}
+
+    current_colour = colour_array[0]
+    current_segment = [0]
+    for index, colour in enumerate(colour_array):
+        if colour != current_colour:
+            current_segment.append(index)
+            colour_segments[tuple(current_segment)] = current_colour
+            current_colour = colour
+            current_segment = [index]
+        else:
+            continue # just do nothing
+
+    # Close the final segment
+    current_segment.append(len(colour_array))
+    colour_segments[tuple(current_segment)] = current_colour
+
+    return colour_segments
+
+
+def _plot_segmented(axis, mz, i, colour_array, linewidth=1.5):
     """
-    fig.canvas.draw_idle()  # Renders the image without displaying it
-    x = np.array(fig.canvas.renderer.buffer_rgba()) # converts the image to bits
-    if filename.endswith('.png'):
-        return plt.imsave(filename, x)
-    else:
-        raise ValueError("filename must end with .png")
+    Draws a spectrum as contiguous same-colour runs, emitting one
+    ax.plot() call per run. Adjacent runs share a boundary point so
+    there are no gaps and no pixel is painted twice.
+    """
+    colour_segments = _find_colour_segments(colour_array)
+    for (seg_start, seg_end), colour in colour_segments.items():
+        axis.plot(mz[seg_start:], i[seg_start:], c=colour, linewidth=linewidth, label='Experimental')
+
+
+def get_nested_attr(object, attr):
+    """Helper function for show_sample_positions. Takes a nested attribute string and finds the value.
+    i.e. 'enzyme.id' will return the ID of a particular enzyme."""
+
+    attr_list = attr.split(sep='.')
+
+    try:
+        # recursively travel through nested objects
+        for i, attr in enumerate(attr_list):
+            attr_value = getattr(object, attr)
+            object = attr_value
+
+        return attr_value
+
+    except AttributeError:
+        print(f"Unable to access attribute {attr}. Skipping.")
+        return None
+
+def _slice_spectrum(start: int, end: int, mz: list, i: list) -> tuple:
+    """
+    Slices the spectrum at indicated start and end values, returns a tuple of lists
+    """
+    mz_slice = []
+    i_slice = []
+    for j in range(len(mz)):
+        if start <= mz[j] <= end:
+            mz_slice.append(mz[j])
+            i_slice.append(i[j])
+    return mz_slice, i_slice

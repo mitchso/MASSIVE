@@ -1,10 +1,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from warnings import deprecated
-from scipy.signal import find_peaks
-from scipy.signal import savgol_filter
-from . import oligo
-from . import enzyme
+import random
+from . import helper
+from . import analytes
 
 
 class Sample:
@@ -15,17 +13,7 @@ class Sample:
         self.name = self.well   # default naming but this can be changed
         self.noise_cutoff = noise_cutoff
         self.mz_offset = mz_offset  # used to manually adjust the spectra if calibration is off.
-
-        # Optional, experiment dependent attributes
-        self.enzyme = enzyme.Enzyme(id=None, name="None")
-        self.ntp = None
-        # allows flexibility for other experimental designs. Can include anything here, and then it will show up in the excel output
-        self.misc_conditions = {
-            # 'incubation_time': None,  # examples
-            # 'cation': None
-        }
-
-        self.mois = []  # MOI = molecule of interest
+        self.analytes = []
 
         # process spectrum
         self.mz_raw = mz    # Keeps a record of the original mz values
@@ -35,10 +23,10 @@ class Sample:
         self.i_filtered = []
 
         self.background = min(self.i)
-        self.i_background_subtracted()  # populates self.i_bg_subtracted
+        self._i_background_subtracted()  # populates self.i_bg_subtracted
 
-        self.noise = self.calculate_noise(self.noise_cutoff)
-        self.filter_i()   # populates self.i_filtered
+        self.noise = self._calculate_noise(self.noise_cutoff)
+        self._filter_i()   # populates self.i_filtered
 
         # params for plotting
         self.total_ion = sum(self.i)
@@ -49,13 +37,13 @@ class Sample:
         """Updates self.mz, useful when mz_offset has been changed."""
         self.mz = [point + self.mz_offset for point in self.mz_raw]
 
-    def collect_attributes(self):
+    def _collect_attributes(self):
         """
         Collects all attributes of the Sample object and returns them as a dictionary.
         Excludes attributes that are only meant to be seen internally.
         """
         include = ['file', 'chip', 'well', 'name', 'noise_cutoff', 'mz_offset', 'background', 'noise']
-        exclude = ['misc_conditions', 'mois', 'mz_raw', 'mz', 'i', 'i_bg_subtracted', 'i_filtered', 'total_ion',
+        exclude = ['misc_conditions', 'analytes', 'mz_raw', 'mz', 'i', 'i_bg_subtracted', 'i_filtered', 'total_ion',
                    'max_i', 'num_points']
 
         attrs = {}
@@ -71,37 +59,19 @@ class Sample:
 
         return attrs
 
-
-
-    def misc_conditions_to_attributes(self):
-        """Converts the misc_conditions dictionary to attributes."""
-        for k, v in self.misc_conditions.items():
-            setattr(self, k, v)
-
-    @deprecated("This was used when processing XML files. The new plain text format does not work with this function.")
-    def unpack_spectrum(self):
-        """
-        Populates self.mz and self.i with values from a spectrum.
-        This occurs when the Sample object is instantiated.
-        """
-        peaks = self.spectrum[0]
-        for peak in peaks:
-            self.mz.append(float(peak.attrib['mz']))
-            self.i.append(float(peak.attrib['i']))
-
-    def moi_intensities(self) -> list[tuple]:
+    def analyte_intensities(self) -> list[tuple]:
         """
         Returns a list of tuples: (molecule name, intensity value), one for each molecule of interest.
         The intensity value is determined by Oligo.mai_intensity()
         """
         intensities = []
-        for moi in self.mois:
+        for a in self.analytes:
             intensities.append(
-                (moi.name, moi.mai_intensity(sample=self))
+                (a.name, a._mai_intensity(sample=self))
             )
         return intensities
 
-    def calculate_noise(self, cutoff: float) -> int:
+    def _calculate_noise(self, cutoff: float) -> int:
         """
         Calculates the noise value of the spectra.
         For our purposes, this is a constant value rather than a function.
@@ -110,33 +80,26 @@ class Sample:
         lowest_vals = sorted(i_vals)[:int(len(i_vals)*cutoff)]
         return max(lowest_vals)
 
-    def i_background_subtracted(self) -> None:
+    def _i_background_subtracted(self) -> None:
         """
         Subtracts the background signal from the spectrum.
         """
         background = self.background
         self.i_bg_subtracted = [i - background for i in self.i]
 
-    def filter_i(self) -> None:
+    def _filter_i(self) -> None:
         """
         Keeps only intensity values above the noise of the instrument.
         """
-        noise = self.noise
 
         i_filtered = []
         for i in self.i_bg_subtracted:
-            if i - noise > 0:
+            if i > self.noise:
                 i_filtered.append(i)
             else:
                 i_filtered.append(0)
 
         self.i_filtered = i_filtered
-
-    def savitzky_golay(self, i=None, window=15, polyorder=3):
-        if i is None:   # allows for smoothing on spectra that have been processed in other ways as well
-            i = self.i
-
-        return savgol_filter(i, window_length=window, polyorder=polyorder)
 
     def plot_distance_between_points(self) -> plt.axes:
         """
@@ -156,31 +119,8 @@ class Sample:
 
         return fig, ax
 
-    def call_peaks(self, i_list: list) -> list[int]:
-        """
-        Uses scipy.signal 'find_peaks' to attempt to call peaks on the graph.
-        Returns index positions of the peaks based on the list of intensity values provided.
-        """
-        peak_indices, properties = find_peaks(i_list,
-                                              prominence=200,
-                                              height=max(i_list) / 10,
-                                              threshold=max(i_list) / 10,
-                                              distance=100)
 
-        return list(peak_indices)
-
-    def slice_spectrum(self, start: int, end: int, mz: list, i: list) -> tuple:
-        """
-        Slices the spectrum at indicated start and end values, returns a tuple of lists
-        """
-        mz_slice = []
-        i_slice = []
-        for j in range(len(mz)):
-            if start <= mz[j] <= end:
-                mz_slice.append(mz[j])
-                i_slice.append(i[j])
-        return mz_slice, i_slice
-
+    # TODO: make this the main plot that gets called by Experiment
     def sorted_signal_plot(self) -> plt.axes:
         """
         Generates # TODO finish describing.
@@ -208,104 +148,203 @@ class Sample:
 
         return fig, ax
 
-    def plot_moi(self, moi: oligo.Oligo, filtered=True) -> plt.axes:
+    def plot_analyte(self, analyte: analytes.Analyte, filtered=True) -> plt.axes:
         """
-        Generates a plot for an MOI, zoomed in to visualize the isotope distribution and mass accuracy.
+        Generates a plot for an analyte, zoomed in to visualize the isotope distribution and mass accuracy.
         """
-        return self.plot(xlim=moi.iso_dist_range,
+        return self.plot(xlim=analyte.iso_dist_range,
                          relative=True,
                          theoretical_dist=True,
                          filtered=filtered,
-                         label_mois=False,
-                         title=f"{moi.name}, monoisotopic mass = {moi.monoisotopic_mass}, charge = +{moi.charge}")
+                         label_analytes=False,
+                         title=f"{analyte.name}, monoisotopic mass = {analyte.monoisotopic_mass}, charge = +{analyte.charge}")
+
+
+
+    def _base_plotter(
+            self,
+            ax=plt.axes,
+            xlim=None,
+            filtered=False,
+            smoothed=False,
+            normalized=False,
+            overlay=False,
+            highlight_analytes=True,
+            label_analytes=True,
+            label_peaks=False,
+            custom_colours=None,
+            base_colour='#1f77b4',
+            analyte_colour='#d1495b',
+            linewidth=1.5
+    ) -> None:
+        """
+        base function for generating and mz vs i plot. Wrapped by other functions.
+        """
+
+        ### Collect correct mz & i values
+        mz_plot = self.mz
+        i_plot = self.i
+
+        if filtered:    # i is now filtered based on noise cutoff
+            i_plot = self.i_filtered
+
+        if xlim:    # adjust x axis limits
+            mz_plot, i_plot = helper._slice_spectrum(start=xlim[0],
+                                                   end=xlim[1],
+                                                   mz=mz_plot,
+                                                   i=i_plot)
+
+        if smoothed:    # apply a savitzky-golay filter
+            i_plot = helper.savitzky_golay(i=i_plot)
+
+        if normalized:  # normalize to 100 as maximum value
+            try:
+                i_plot = [i*100 / max(i_plot) for i in i_plot]
+            except ZeroDivisionError:
+                print("Normalization failed, all intensity values are 0. \n"
+                      "Try plotting your data without normalization.")
+
+        if overlay: # apply a random scaling to prevent overlapping lines from becoming unreadable
+            i_plot = [i * random.uniform(0.90, 1.00) for i in i_plot]
+
+
+
+        ### Assign a colour to every data point
+        if custom_colours:
+            # make sure the custom colours are in the correct format
+            custom_colours = {tuple(x_range): colour for x_range, colour in custom_colours.items()}
+        else:
+            custom_colours = {}
+
+        if highlight_analytes:
+            analyte_ranges = [a.iso_dist_range for a in self.analytes]
+        else:
+            analyte_ranges = []
+
+        # build the colour array
+        colours = helper._build_colour_array(x_vals=mz_plot,
+                                             analyte_ranges=analyte_ranges,
+                                             custom_colour_ranges=custom_colours,
+                                             base_colour=base_colour,
+                                             analyte_colour=analyte_colour)
+
+        ### Plot the line
+        helper._plot_segmented(axis=ax,
+                               mz=mz_plot,
+                               i=i_plot,
+                               colour_array=colours,
+                               linewidth=linewidth)
+
+        ### Add labels and annotations
+        if label_peaks:
+            peaks, _ = helper._call_peaks(i_plot)
+            for peak in peaks:
+                ax.plot(mz_plot[peak], i_plot[peak], 'x', color='black')
+                ax.vlines(mz_plot[peak], ymin=-9, ymax=i_plot[peak], colors='grey')
+                ax.text(
+                    x=mz_plot[peak], y=i_plot[peak] + 10,
+                    s=str(int(round(mz_plot[peak], 0))),
+                    horizontalalignment='center', rotation=75,
+                    verticalalignment='bottom', fontsize=10,
+                )
+
+        if label_analytes:
+            for a in self.analytes:
+                if min(mz_plot) < a.monoisotopic_mass < max(mz_plot):
+                    a_range = a.iso_dist_range
+                    _, i_slice = helper._slice_spectrum(start=a_range[0],
+                                                        end=a_range[1],
+                                                        mz=mz_plot,
+                                                        i=i_plot)
+
+                    if overlay:
+                        analyte_label_height = 105
+                    elif normalized:
+                        analyte_label_height = max(i_slice) + 10
+                    else:
+                        y_min, y_max = ax.get_ylim()
+                        analyte_label_height = max(i_slice) + (y_max - y_min) * 0.10
+
+                    ax.text(x=a.monoisotopic_mass,
+                            y=analyte_label_height,
+                            s=a.name,
+                            horizontalalignment='center',
+                            fontsize=10)
+
+
+        ### Formatting
+        ymax = round(max(i_plot) * 1.2 + 1)  # +1 accounts for possibly all 0 values
+        ax.set_ylim(ymin=min(i_plot), ymax=ymax)
+        ax.set_xlim(min(mz_plot), max(mz_plot))
+
 
     def plot(
             self,
             xlim=None,
-            relative=False,
+            normalized=False,
             label_peaks=False,
             theoretical_dist=False,
-            label_mois=False,
+            highlight_analytes=True,
+            label_analytes=True,
             filtered=False,
-            bg_subtracted=False,
             smoothed=False,
-            range_of_interest=False,
             title=None,
-            colour='#00798c',
+            custom_colours=None,
+            base_colour='#1f77b4',
+            analyte_colour='#d1495b',
+            theoretical_colour='#CC6677',
+            linewidth=1.5,
             ax=None,
+            figsize=(8, 3)
     ) -> plt.axes:
 
         """
         General purpose plotting function for a Sample's spectrum.
         """
+        ### Settings
+        if theoretical_dist:
+            normalized = True
 
-        mz_plot = self.mz
-        i_plot = self.i
+        if not title:
+            title = f'Sample: {self.name}'
 
-
-        if bg_subtracted:   # only works if filtered=False
-            i_plot = self.i_bg_subtracted
-
-        if filtered:  # Choose filtered or raw values
-            i_plot = self.i_filtered
-
-        if xlim:    # Adjust x axis limits
-            mz_plot, i_plot = self.slice_spectrum(start=xlim[0], end=xlim[1], mz=mz_plot, i=i_plot)
+        if normalized:
+            ylabel = 'Relative intensity (au)'
         else:
-            xlim = (min(mz_plot), max(mz_plot))  # Needed to set plt.xlim later
+            ylabel = 'Ion count'
 
-        if relative:    # Choose relative or absolute intensity
-            try:
-                i_max = max(i_plot)
-                i_plot = [i*100/i_max for i in i_plot]
-            except ZeroDivisionError:  # occurs when all i values are 0
-                pass
-
-
-        if ax is None:
+        if ax is None:  # create a standalone figure
             plt.style.use('default')
-            fig, ax = plt.subplots(figsize=(8, 3))
+            fig, ax = plt.subplots(figsize=figsize)
 
         # Base plot
-        ax.plot(mz_plot, i_plot, label=f'Exp data', c=colour, linewidth=1, zorder=10)
-
-        if label_peaks:  # Label peaks
-            peak_indices = self.call_peaks(i_plot)
-            peak_x = [mz_plot[x] for x in peak_indices]
-            peak_y = [i_plot[x] for x in peak_indices]
-            ax.scatter(peak_x, peak_y, color='red', marker='x', s=2)
-
-            for x, y in zip(peak_x, peak_y):
-                ax.annotate(f'{round(x)}', (x, y*1.02), ha='center')
+        self._base_plotter(ax=ax,
+                           xlim=xlim,
+                           filtered=filtered,
+                           smoothed=smoothed,
+                           normalized=normalized,
+                           overlay=False,   # Always false for standalone plots
+                           highlight_analytes=highlight_analytes,
+                           label_analytes=label_analytes,
+                           label_peaks=label_peaks,
+                           custom_colours=custom_colours,
+                           base_colour=base_colour,
+                           analyte_colour=analyte_colour,
+                           linewidth=linewidth)
 
         if theoretical_dist:   # Overlay theoretical isotope distributions
-            for moi in self.mois:
-                moi.iso_dist_plot(y_max=max(i_plot), standalone=False, colour='#CC6677')
+            for a in self.analytes:
+                a.iso_dist_plot(ax=ax, y_max=100, colour=theoretical_colour, annotate=False)
 
-                if range_of_interest:
-                    ax.plot(moi.iso_dist_range,  # x1, x2
-                            [(max(i_plot)+1)/10] * 2,  # y1, y2 (both values will be max(i_plot)+1/10
-                            label='Range of interest', marker='.', markersize=10)
-
-        if label_mois:  # Add indicators for each MOI
-            for moi in self.mois:
-                xy = moi.monoisotopic_mass, moi.mai_intensity(sample=self) + 0.1 * max(i_plot)
-                ax.annotate(text=f"{moi.name}", xy=xy, rotation=0, ha='center')
+            # Create a legend
+            handles, labels = plt.gca().get_legend_handles_labels()
+            by_label = dict(zip(labels, handles))
+            ax.legend(by_label.values(), by_label.keys())
 
         # Formatting
-        ymax = round(max(i_plot) * 1.2 + 1)  # +1 accounts for possibly all 0 values
-        default_title = f'Sample: {self.well}'
-
-        ax.set_ylim(0, ymax)
-        ax.set_xlim(xlim[0], xlim[1])
-        ax.set_title(default_title) if title is None else plt.title(title)
-        ax.set_ylabel(f'Relative intensity (au)') if relative else plt.ylabel(f'Ion count')
+        ax.set_title(title)
+        ax.set_ylabel(ylabel)
         ax.set_xlabel('m/z')
-
-        # Create a legend
-        handles, labels = plt.gca().get_legend_handles_labels()
-        by_label = dict(zip(labels, handles))
-        plt.legend(by_label.values(), by_label.keys())
 
         return ax
 

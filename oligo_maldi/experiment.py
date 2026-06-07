@@ -1,9 +1,8 @@
 import os
 import random
 import xlsxwriter
-import pyopenms as oms
-from .helper import *
-from warnings import deprecated
+from . import helper
+from .sample import Sample
 from scipy.signal import find_peaks
 from string import ascii_uppercase
 import numpy as np
@@ -15,7 +14,7 @@ class Experiment:
     def __init__(self, data_folder=None, noise_cutoff=0.95):
         self.data_folder = data_folder
         self.noise_cutoff = noise_cutoff
-        self.samples, self.calibrant_spots = self.data_folder_to_sample_dict()
+        self.samples, self.calibrant_spots = self._data_folder_to_sample_dict()
         self.exclude = [] # used to remove certain wells from further analysis.
 
     def reinitiate_samples(self, samples):
@@ -25,7 +24,8 @@ class Experiment:
         """
         sample_dict = {}
         for s in samples:
-            new_sample = Sample(well=s.well,
+            new_sample = Sample(file=s.file,
+                                well=s.well,
                                 mz=s.mz,
                                 i=s.i,
                                 noise_cutoff=self.noise_cutoff)
@@ -33,7 +33,7 @@ class Experiment:
 
         return sample_dict
 
-    def data_folder_to_sample_dict(self):
+    def _data_folder_to_sample_dict(self):
         """
         Takes a folder of txt files where each file corresponds to 1 spectra, encoded as m/z - intensity pairs.
         Returns a sample dictionary where each entry is 1 spectra, named according to filenames.
@@ -45,6 +45,7 @@ class Experiment:
         for root, dirs, files in os.walk(self.data_folder):
             root = root
             files = files
+            break   # stop at first level of folder
 
         sample_dict = {}
         calibrant_dict = {}
@@ -75,16 +76,16 @@ class Experiment:
 
         return sample_dict, calibrant_dict
 
-    def collect_mois(self) -> list:
+    def collect_analytes(self) -> list:
         """
-        Collects all MOIs identified in experimental samples, removes duplicates,
+        Collects all analytes identified in experimental samples, removes duplicates,
         and returns them as an alphabetically sorted list.
         """
-        moi_list = []
+        analyte_list = []
         for s in self.samples.values():
-            moi_list.extend(s.mois)
+            analyte_list.extend(s.analytes)
 
-        unique_mois = list(set(moi_list))
+        unique_mois = list(set(analyte_list))
         sorted_mois = sorted(unique_mois, key=lambda x: x.name)
 
         return sorted_mois
@@ -96,26 +97,7 @@ class Experiment:
         """
         pass    # stub
 
-    @staticmethod
-    def get_nested_attr(object, attr):
-        """Helper function for show_sample_positions. Takes a nested attribute string and finds the value.
-        i.e. 'enzyme.id' will return the ID of a particular enzyme."""
-
-        attr_list = attr.split(sep='.')
-
-        try:
-            # recursively travel through nested objects
-            for i, attr in enumerate(attr_list):
-                attr_value = getattr(object, attr)
-                object = attr_value
-
-            return attr_value
-
-        except AttributeError:
-            print(f"Unable to access attribute {attr}. Skipping.")
-            return None
-
-    def show_sample_positions(self, attrs: list = ['enzyme.id', 'ntp'], fontsize=8) -> plt.axes:
+    def show_sample_positions(self, attrs: list, fontsize=8) -> plt.axes:
         """
         Used to visualize sample definitions on a 384-well plate, so you know you've done it right.
         :return:
@@ -144,7 +126,7 @@ class Experiment:
                     sample = self.samples[well]
                     strings = []
                     for attr in attrs:
-                        attr_value = self.get_nested_attr(sample, attr)
+                        attr_value = helper.get_nested_attr(sample, attr)
 
                         # if the attribute is a list, convert it to a string.
                         if isinstance(attr_value, list):
@@ -210,9 +192,9 @@ class Experiment:
                         try:    # check if variable is an attribute of the sample
                             d = getattr(sample, variable)
                         except AttributeError:  # if it isn't, check MOIs
-                            for moi in sample.mois:
+                            for moi in sample.analytes:
                                 if moi.name == variable:
-                                    d = moi.mai_intensity(sample)
+                                    d = moi._mai_intensity(sample)
                                     break
                         except TypeError:   # occurs if denominator=None
                             pass
@@ -260,347 +242,110 @@ class Experiment:
                 title = f"{numerator} / {denominator}"
             else:
                 title = numerator
-        else:
-            pass
 
         ax.set_title(title)
         fig.tight_layout()
         return fig, ax
 
-    def stacked_plot(self, wells: list, xlim=None, title=None, filtered=False, smoothed=False, figsize=None,
-                     label=True, label_first_only=True, overlay=False, hide_excluded=True, label_peaks=False, custom_colours=None, base_colour='#1f77b4') -> plt.axes:
-        """
-        Takes a list of well IDs and returns a plot of each spectrum stacked vertically.
 
-        X-values are determined by xlim parameter. If none provided, use the whole spectrum.
-        Y-values are background corrected and always relative.
+    def stacked_plot(
+            self,
+            wells: list,
+            xlim=None,
+            title=None,
+            filtered=False,
+            smoothed=False,
+            figsize=None,
+            label_analytes=True,
+            highlight_analytes=True,
+            label_first_only=True,
+            overlay=False,
+            hide_excluded=True,
+            label_peaks=False,
+            custom_colours=None,
+            base_colour='#1f77b4',
+            analyte_colour='#d1495b',
+    ) -> plt.axes:
         """
-        plt.style.use('default')
+        Takes a list of well IDs and returns a plot of each spectrum stacked
+        vertically (or overlaid on a single axis if overlay=True).
+
+        Each point is assigned exactly one colour by priority:
+            base_colour (lowest) < MOI colour ('#d1495b') < custom_colour (highest)
+        Contiguous same-colour runs are drawn as a single ax.plot() call, so
+        no pixel is painted twice and there are no overlapping-line artifacts.
+
+        Parameters
+        ----------
+        wells            : list of well IDs to plot
+        xlim             : (start_mz, end_mz) window; uses full spectrum if None
+        title            : figure suptitle
+        filtered         : use noise-filtered intensities
+        smoothed         : apply Savitzky-Golay smoothing
+        figsize          : (width, height) in inches; auto-sized if None
+        label            : annotate MOI names above their peaks
+        label_first_only : only label MOIs on the first spectrum (reduces clutter)
+        overlay          : draw all spectra on one axis instead of stacking
+        hide_excluded    : skip wells listed in self.exclude
+        label_peaks      : annotate detected peaks with their m/z value
+        custom_colours   : {(start_mz, end_mz): colour_str, ...}
+                           e.g. {(4830, 4843): '#0072B2', (4847, 4856): '#CC6677'}
+        base_colour      : colour for regions with no special assignment
+        """
+        ### inital setup
+        if hide_excluded:
+            wells = [well for well in wells if well not in self.exclude]
+
         if figsize is None:
-            if overlay:
-                figsize = (12, 3)
-            if not overlay:
-                if len(wells) > 1:
-                    figsize = (12, len(wells) * 1)  # (x size, y size)
-                else:
-                    figsize = (12, 3)
+            figsize = (12, 3) if overlay or len(wells) == 1 else (12, len(wells))
 
-        fig, axs = plt.subplots(nrows=1 if overlay else len(wells),
-                                ncols=1,
-                                figsize=figsize,  # width, height in inches
-                                sharex=True, sharey=True)
-
-        for n, well in enumerate(wells):
-            if hide_excluded is True and well in self.exclude:
-                continue
-
-            sample = self.samples[well]
-            mz_plot = sample.mz  # initial mz
-            i_plot = sample.i # initial i
-
-            if filtered:
-                i_plot = sample.i_filtered
-
-            if smoothed:
-                i_plot = sample.savitzky_golay(i=i_plot)
-
-            if xlim:  # slice by xlim
-                mz_plot, i_plot = sample.slice_spectrum(start=xlim[0], end=xlim[1], mz=mz_plot, i=i_plot)
-
-
-            try:
-                i_max = max(i_plot)  # scale everything relative to what is in range
-                i_plot = [i * 100 / i_max for i in i_plot]
-                if overlay:
-                    # many overlapping peaks that are too uniform becomes hard to read.
-                    # this section will randomly scale down each spectrum to create some variation
-                    small_offset = random.uniform(0.90, 1.00)
-                    i_plot = [i * small_offset for i in i_plot]
-            except ZeroDivisionError:
-                pass
-
-            try:
-                axis = axs[n]
-            except TypeError:
-                axis = axs
-
-            if label_peaks:
-                label = False   # turn of MOI species labels
-                plt.subplots_adjust(hspace=0.5) # add some extra space between plots
-                peaks, _ = find_peaks(i_plot, height=20)    # simple peak finding algorithm, only detects peaks >20% max signal
-                for i, peak in enumerate(peaks):
-                    try:    # catches an error that occurs when checking the final peak in the list
-                        if peaks[i + 1] - peaks[i] < 5: # skip peaks that are less than 5 daltons separated
-                            plot_peak = False
-                        else:
-                            plot_peak = True
-
-                    except IndexError:
-                        plot_peak = True
-
-                    if plot_peak:
-                        axis.plot(mz_plot[peak], i_plot[peak], 'x', color='black')
-                        axis.vlines(mz_plot[peak], ymin=-9, ymax=i_plot[peak], colors='grey')
-                        axis.text(x=mz_plot[peak], y=i_plot[peak] + 10, s=str(int(round(mz_plot[peak], 0))),
-                                  horizontalalignment='center', rotation=75, verticalalignment='bottom',
-                                  fontsize=10)
-
-            if overlay:
-                axis.plot(mz_plot, i_plot, linewidth=1.5)
-            else:
-                axis.plot(mz_plot, i_plot, linewidth=1.5, c=base_colour)
-
-            axis.set_ylim(-10, 150)
-            axis.set_xlim(min(mz_plot), max(mz_plot))
-            axis.spines['top'].set_visible(False)
-            axis.spines['right'].set_visible(False)
-            axis.spines['left'].set_visible(False)
-            axis.spines['bottom'].set_position(('data', -5))
-
-            if not overlay:
-                axis.text(x=min(mz_plot), y=0, s=f"{sample.name} ", horizontalalignment='right')
-
-            for moi in sample.mois:  # colour mois:
-                moi_range = moi.iso_dist_range
-                mz_moi, i_moi = sample.slice_spectrum(start=moi_range[0], end=moi_range[1], mz=mz_plot, i=i_plot)
-                if not overlay:
-                    axis.plot(mz_moi, i_moi, c='#d1495b', linewidth=1.5)
-
-                if label:
-                    if overlay:
-                        moi_label_height = 105
-                    else:
-                        try:
-                            moi_label_height = max(i_moi) + 20
-                        except ValueError:
-                            moi_label_height = 20
-
-                    if label_first_only:
-                        if n == 0:
-                            if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):  # Add species labels
-                                axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
-                                          fontsize=10)
-                    else:
-                        if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):  # Add species labels
-                            axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name, horizontalalignment='center',
-                                      fontsize=10)
-
-            try:
-                for colour, c_range in custom_colours.items():
-                    mz_colour, i_colour = sample.slice_spectrum(start=c_range[0], end=c_range[1], mz=mz_plot, i=i_plot)
-                    axis.plot(mz_colour, i_colour, c=colour, linewidth=1.5)
-            except:
-                pass
-
-        plt.xlabel(f'm/z')
-        plt.yticks([])
-
-        if title:
-            plt.suptitle(title)
-        # plt.tight_layout()
-        # plt.subplots_adjust(wspace=0, hspace=0)
-
-        return fig, axs
-
-    # claude /start
-    # TODO: verify this code and integrate it into stacked_plot
-    def stacked_plot_segmented(self, wells: list, xlim=None, title=None, filtered=False, smoothed=False,
-                               figsize=None, label=True, label_first_only=True, overlay=False,
-                               hide_excluded=True, label_peaks=False, custom_colours=None,
-                               base_colour='#1f77b4') -> plt.axes:
-        """
-        Identical to stacked_plot() but uses a segmented drawing strategy to eliminate
-        overlapping line artifacts. Each point on the spectrum is assigned exactly one colour
-        according to priority: base_colour < moi colour < custom_colour. Contiguous runs of
-        the same colour are then drawn as a single ax.plot() call, so no pixel is painted twice.
-
-        custom_colours format: {(start, end): colour_str, ...}
-            Keys are (start_mz, end_mz) tuples; values are colour strings. This allows the
-            same colour to be reused across multiple ranges, and guarantees each range has
-            exactly one colour. Example:
-                custom_colours = {(4830, 4843): '#0072B2',
-                                  (4847, 4856): '#CC6677',
-                                  (4856, 4865): '#CC6677'}  # same colour, two ranges
-
-        All other parameters are identical to stacked_plot().
-        """
-
-        def build_colour_array(mz_arr, moi_ranges, custom_colour_ranges, base_colour):
-            """
-            Build a list of colours, one per m/z point, respecting priority:
-                1. base_colour       (lowest priority)
-                2. moi colour        ('#d1495b')
-                3. custom colours    (highest priority)
-
-            moi_ranges:           list of (start, end) tuples
-            custom_colour_ranges: dict of {(start, end): colour_str}
-            """
-            colours = [base_colour] * len(mz_arr)
-
-            # Layer 2: MOI regions
-            for start, end in moi_ranges:
-                for idx, mz_val in enumerate(mz_arr):
-                    if start <= mz_val <= end:
-                        colours[idx] = '#d1495b'
-
-            # Layer 3: custom colours (highest priority)
-            if custom_colour_ranges:
-                for (start, end), colour in custom_colour_ranges.items():
-                    for idx, mz_val in enumerate(mz_arr):
-                        if start <= mz_val <= end:
-                            colours[idx] = colour
-
-            return colours
-
-        def plot_segmented(axis, mz_arr, i_arr, colours):
-            """
-            Walk the colour array and emit one ax.plot() call per contiguous
-            same-colour run. Adjacent segments share their boundary point so
-            there are no gaps and no overlapping draws.
-            """
-            mz_arr = list(mz_arr)
-            i_arr = list(i_arr)
-            n = len(mz_arr)
-            if n == 0:
-                return
-
-            seg_start = 0
-            for idx in range(1, n):
-                if colours[idx] != colours[seg_start]:
-                    # Plot the segment, including the current point as a shared
-                    # boundary so adjacent segments connect seamlessly
-                    axis.plot(mz_arr[seg_start:idx + 1],
-                              i_arr[seg_start:idx + 1],
-                              c=colours[seg_start], linewidth=1.5)
-                    seg_start = idx  # next segment starts at the boundary point
-
-            # Plot the final segment
-            axis.plot(mz_arr[seg_start:],
-                      i_arr[seg_start:],
-                      c=colours[seg_start], linewidth=1.5)
-
-        # ------------------------------------------------------------------ #
-        #  Figure setup — identical to stacked_plot()                         #
-        # ------------------------------------------------------------------ #
+        ### Make the figure
         plt.style.use('default')
-        if figsize is None:
-            if overlay:
-                figsize = (12, 3)
-            else:
-                figsize = (12, len(wells) * 1) if len(wells) > 1 else (12, 3)
+        fig, axs = plt.subplots(
+            nrows=1 if overlay else len(wells),
+            ncols=1,
+            figsize=figsize,
+            sharex=True,
+            sharey=True,
+        )
 
-        fig, axs = plt.subplots(nrows=1 if overlay else len(wells),
-                                ncols=1,
-                                figsize=figsize,
-                                sharex=True, sharey=True)
-
+        ### plot each sample
         for n, well in enumerate(wells):
-            if hide_excluded and well in self.exclude:
-                continue
-
             sample = self.samples[well]
-            mz_plot = sample.mz
-            i_plot = sample.i
 
-            if filtered:
-                i_plot = sample.i_filtered
-            if smoothed:
-                i_plot = sample.savitzky_golay(i=i_plot)
-            if xlim:
-                mz_plot, i_plot = sample.slice_spectrum(start=xlim[0], end=xlim[1],
-                                                        mz=mz_plot, i=i_plot)
+            if overlay:
+                ax = axs[1]
+            else:
+                ax = axs[n]
 
-            try:
-                i_max = max(i_plot)
-                i_plot = [i * 100 / i_max for i in i_plot]
-                if overlay:
-                    small_offset = random.uniform(0.90, 1.00)
-                    i_plot = [i * small_offset for i in i_plot]
-            except ZeroDivisionError:
-                pass
+            if label_first_only and n != 0:
+                label_analytes = False
 
-            try:
-                axis = axs[n]
-            except TypeError:
-                axis = axs
+            sample._base_plotter(ax=ax,
+                                 xlim=xlim,
+                                 filtered=filtered,
+                                 smoothed=smoothed,
+                                 normalized=True,
+                                 overlay=overlay,
+                                 highlight_analytes=highlight_analytes,
+                                 label_analytes=label_analytes,
+                                 label_peaks=label_peaks,
+                                 custom_colours=custom_colours,
+                                 base_colour=base_colour,
+                                 analyte_colour=analyte_colour,
+                                 linewidth=1.5)
 
-            # ---------------------------------------------------------- #
-            #  Collect colour regions for this sample                      #
-            # ---------------------------------------------------------- #
-            moi_ranges = []
-            for moi in sample.mois:
-                if not overlay:  # MOI colouring is suppressed in overlay mode (matches original)
-                    moi_ranges.append(moi.calc_iso_dist_range())
-
-            custom_colour_ranges = custom_colours if custom_colours else {}
-            # Normalise keys to plain tuples (support both list and tuple from the caller)
-            custom_colour_ranges = {tuple(r): c for r, c in
-                                    custom_colour_ranges.items()} if custom_colour_ranges else {}
-
-            # ---------------------------------------------------------- #
-            #  Build per-point colour array and draw segmented spectrum    #
-            # ---------------------------------------------------------- #
-            colours = build_colour_array(mz_plot, moi_ranges, custom_colour_ranges, base_colour)
-            plot_segmented(axis, mz_plot, i_plot, colours)
-
-            # ---------------------------------------------------------- #
-            #  Axis cosmetics — identical to stacked_plot()               #
-            # ---------------------------------------------------------- #
-            axis.set_ylim(-10, 150)
-            axis.set_xlim(min(mz_plot), max(mz_plot))
-            axis.spines['top'].set_visible(False)
-            axis.spines['right'].set_visible(False)
-            axis.spines['left'].set_visible(False)
-            axis.spines['bottom'].set_position(('data', -5))
+            ### Formatting
+            for spine in ['top', 'right', 'left']:
+                ax.spines[spine].set_visible(False)
+            ax.spines['bottom'].set_position(('data', -5))
 
             if not overlay:
-                axis.text(x=min(mz_plot), y=0, s=f"{sample.name} ",
-                          horizontalalignment='right')
+                x_min, x_max = ax.get_xlim()
+                ax.text(x=x_min, y=0, s=f"{sample.name} ", horizontalalignment='right')
 
-            # ---------------------------------------------------------- #
-            #  Peak labels                                                 #
-            # ---------------------------------------------------------- #
-            if label_peaks:
-                plt.subplots_adjust(hspace=0.5)
-                peaks, _ = find_peaks(i_plot, height=20)
-                for i, peak in enumerate(peaks):
-                    try:
-                        plot_peak = (peaks[i + 1] - peaks[i]) >= 5
-                    except IndexError:
-                        plot_peak = True
-                    if plot_peak:
-                        axis.plot(mz_plot[peak], i_plot[peak], 'x', color='black')
-                        axis.vlines(mz_plot[peak], ymin=-9, ymax=i_plot[peak], colors='grey')
-                        axis.text(x=mz_plot[peak], y=i_plot[peak] + 10,
-                                  s=str(int(round(mz_plot[peak], 0))),
-                                  horizontalalignment='center', rotation=75,
-                                  verticalalignment='bottom', fontsize=10)
-
-            # ---------------------------------------------------------- #
-            #  MOI and custom-colour region labels                         #
-            # ---------------------------------------------------------- #
-            if label and not label_peaks:
-                for moi in sample.mois:
-                    moi_range = moi.calc_iso_dist_range()
-                    _, i_moi = sample.slice_spectrum(start=moi_range[0], end=moi_range[1],
-                                                     mz=mz_plot, i=i_plot)
-                    if overlay:
-                        moi_label_height = 105
-                    else:
-                        try:
-                            moi_label_height = max(i_moi) + 20
-                        except ValueError:
-                            moi_label_height = 20
-
-                    if label_first_only:
-                        if n == 0 and min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):
-                            axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name,
-                                      horizontalalignment='center', fontsize=10)
-                    else:
-                        if min(mz_plot) < moi.monoisotopic_mass < max(mz_plot):
-                            axis.text(x=moi.monoisotopic_mass, y=moi_label_height, s=moi.name,
-                                      horizontalalignment='center', fontsize=10)
-
+        ### Final formatting
+        ax.set_ylim(-10, 150)   # only have to set one time because share_y is True
         plt.xlabel('m/z')
         plt.yticks([])
         if title:
@@ -608,7 +353,6 @@ class Experiment:
 
         return fig, axs
 
-    # claude /end
 
     def total_ion_plot(self) -> plt.axes:
         """
@@ -631,7 +375,7 @@ class Experiment:
 
         return fig, ax
 
-    def sorted_signal_plot(self, xlim=[50,100], label_noisy_samples=False) -> plt.axes:
+    def sorted_signal_plot(self, xlim=(50,100), label_noisy_samples=False) -> plt.axes:
         """
         Visualizes the signal intensity of an entire sample, sorted from low to high and showing how the
         'noise_cutoff' parameter aligns with the data.
@@ -666,7 +410,7 @@ class Experiment:
 
         return fig, ax
 
-    def collect_sample_data(self, headers: list, i_type='filtered') -> dict:
+    def _collect_sample_data(self, headers: list, i_type='filtered') -> dict:
         """
         Collects general sample information and the most abundant ion intensity for each sample.
         """
@@ -688,21 +432,21 @@ class Experiment:
                 except AttributeError:
                     pass
 
-                # if that doesn't work, it could be a MOI species
-                for moi in v.mois:
-                    if moi.name == item:
-                        data[k][item] = moi.mai_intensity(sample=v, i_type=i_type)
+                # if that doesn't work, it could be an analyte
+                for a in v.analytes:
+                    if a.name == item:
+                        data[k][item] = a._mai_intensity(sample=v, i_type=i_type)
 
         return data
 
-    def write_excel_readme(self, workbook):
+    def _write_excel_readme(self, workbook):
         """Adds a README worksheet to the data output workbook. Use with write_to_excel()."""
 
         # write README
         readme = f"""
-                mois: Contains all molecules of interest and their associated information.
+                analytes: Contains all analyte and their associated information.
 
-                raw: Unprocessed data. Each entry corresponds to the ion intensity of the most abundant isotope of a given molecule.
+                raw: Unprocessed data. Each entry corresponds to the ion intensity of the most abundant isotope of a given analyte.
 
                 bg_sub: Raw data with background subtraction.
 
@@ -721,43 +465,43 @@ class Experiment:
         worksheet = workbook.add_worksheet('readme')
         worksheet.insert_textbox('B2', readme, {'width': 1000, 'height': 1000})
 
-    def write_excel_mois(self, workbook):
+    def _write_excel_analytes(self, workbook):
         """Adds a worksheet to the data output workbook, containing information about.
-         All the molecules of interest in the experiment.
+         All the analytes in the experiment.
          Use with write_to_excel()."""
 
-        worksheet = workbook.add_worksheet('mois')
+        worksheet = workbook.add_worksheet('analytes')
 
-        # write MOI data
+        # write analyte data
         headers = ['name', 'sequence', 'composition', 'monoisotopic mass', 'average mass']
         for i, header in enumerate(headers):  # write headers
             worksheet.write(0, i, header)
 
-        mois = self.collect_mois()
-        for i, moi in enumerate(mois):  # i + 1 for row
-            data = [moi.name, moi.seq, moi.composition_str(), moi.monoisotopic_mass, moi.average_mass]
+        analytes = self.collect_analytes()
+        for i, a in enumerate(analytes):  # i + 1 for row
+            data = [a.name, a.seq, a.composition_str(), a.monoisotopic_mass, a.average_mass]
             for j, ele in enumerate(data):  # j for column
                 worksheet.write(i + 1, j, ele)
 
-    def collect_attributes_for_excel(self):
+    def _collect_attributes_for_excel(self):
         """Collects all attributes from samples that should be written to excel."""
 
         # collect regular attributes
         attribute_keys = []
         for s in self.samples.values():
-            for k, v in s.collect_attributes().items():
+            for k, v in s._collect_attributes().items():
                 if k not in attribute_keys:
                     attribute_keys.append(k)
 
         # collect moi names
-        moi_attributes = [m.name for m in self.collect_mois()]
+        analyte_attributes = [a.name for a in self.collect_analytes()]
 
-        return attribute_keys + moi_attributes
+        return attribute_keys + analyte_attributes
 
-    def write_excel_data(self, workbook):
+    def _write_excel_data(self, workbook):
         """Adds worksheets to the data output workbook, containing all experimental data."""
         # write data sheets
-        headers = self.collect_attributes_for_excel()
+        headers = self._collect_attributes_for_excel()
 
         i_types = ['raw', 'bg_sub', 'filtered']
         for i_type in i_types:
@@ -767,7 +511,7 @@ class Experiment:
 
             # write data
             i = 1
-            data = self.collect_sample_data(headers=headers, i_type=i_type)  # collect data according to i_type param
+            data = self._collect_sample_data(headers=headers, i_type=i_type)  # collect data according to i_type param
 
             # lambda function sorts keys by letter (row) and then number (column)
             sorted_keys = sorted(data.keys(), key=lambda x: (x[0], int(x[1:])))
@@ -796,8 +540,8 @@ class Experiment:
                 return
 
         workbook = xlsxwriter.Workbook(outfile)
-        self.write_excel_readme(workbook)
-        self.write_excel_mois(workbook)
-        self.write_excel_data(workbook)
+        self._write_excel_readme(workbook)
+        self._write_excel_analytes(workbook)
+        self._write_excel_data(workbook)
         workbook.close()
 

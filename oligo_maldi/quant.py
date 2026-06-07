@@ -5,29 +5,80 @@ import numpy as np
 import warnings
 import sys
 import os
+import math
 from collections.abc import Callable
-# import matplotlib.ticker as ticker
-# import xlsxwriter
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
-colour_dict = {'dark grey': '#333333',
-               'grey': '#737373',
-               'light grey': '#b3b3b3',
-               'lighter grey': '#e6e6e6',
 
-               'dark blue': '#007aed',
-               'blue': '#5fa8ed',
-               'light blue': '#bed6ed',
+def default_activity_score(unreacted: float, correct: float, a1=1, a2=1, b1=2, b2=2):
+    """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+    if unreacted == 1:
+        score = 0
 
-               'dark red': '#ff2700',
-               'red': '#ff7d66',
-               'light red': '#ffd4cc',
+    else:
+        reacted = 1 - unreacted
+        correctness = correct / reacted
 
-               'dark green': '#44cc00',
-               'green': '#7acc52',
-               'light green': '#b1cca3'}
+        score = (a1 * reacted**b1 + a2 * correctness**b2) / (a1 + a2)
+
+    return score
+
+
+def activity_score_exponential(unreacted: float, correct: float, a1=1, a2=1, b1=2, b2=2):
+    """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+    # TODO: verify implementation
+    reacted = 1 - unreacted
+
+    if unreacted == 1:
+        correctness = 1
+    else:
+        correctness = correct / reacted
+
+    score = math.exp(reacted) + correctness**b2
+
+    return score
+
+def activity_score_multiplied(unreacted: float, correct: float, a1=1, a2=1, b1=2, b2=2):
+    """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+    # TODO: verify implementation
+    if unreacted == 1:
+        score = 0
+
+    else:
+        reacted = 1 - unreacted
+        correctness = correct / reacted
+
+        score = (reacted**b1 * correctness**b2)
+
+    return score
+
+def activity_score_r_plus_rc(unreacted: float, correct: float, a1=1, a2=1, b1=1, b2=2):
+    """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+    if unreacted == 1:
+        score = 0
+
+    else:
+        reacted = 1 - unreacted
+        correctness = correct / reacted
+
+        score = (a1 * reacted ** b1 + a2 * reacted * correctness ** b2) / (a1 + a2)
+
+    return score
+
+def activity_score_c_only(unreacted: float, correct: float, a1=1, a2=1, b1=1, b2=2):
+    """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
+    if unreacted == 1:
+        score = 0
+
+    else:
+        reacted = 1 - unreacted
+        correctness = correct / reacted
+
+        score = reacted * correctness
+
+    return score
 
 
 def get_aa_position(label):
