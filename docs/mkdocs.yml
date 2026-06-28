@@ -1,0 +1,36 @@
+site_name: MASSIVE
+site_url: https://mitchso.github.io/MASSIVE
+repo_url: https://github.com/mitchso/MASSIVE
+repo_name: mitchso/MASSIVE
+
+theme:
+  name: material
+  palette:
+    scheme: slate
+    primary: indigo
+    accent: indigo
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+
+nav:
+  - Home: index.md
+  - API Reference:
+    - analytes: api/analytes.md
+    - experiment: api/experiment.md
+    - helper: api/helper.md
+    - metadata: api/metadata.md
+    - quant: api/quant.md
+    - sample: api/sample.md
