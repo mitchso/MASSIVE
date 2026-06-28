@@ -3,9 +3,51 @@ from brainpy import isotopic_variants
 
 
 class Analyte:
-    def __init__(self, name, composition, charge=1, mods=None):
+    """
+    Base class representing any molecule with a specific elemental composition.
+
+    Attributes such as monoisotopic mass, average mass, and isotopic distribution are automatically calculated.
+
+    The base Analyte class is typically useful for small molecules, while the subclasses Oligo and Peptide are helpful for defining larger molecules in terms of their sequences (i.e. 'ACTGTA') and their modifications (i.e. methylation, phosphorylation)
+    """
+    def __init__(self, name:str, composition:dict, charge:int=1, mods:None|list|dict|str=None):
+        """
+        Args:
+            name: Human-readable name for the analyte.
+            composition: Elemental composition as a dict e.g. {'C': 10, 'H': 13, 'N': 5}.
+            charge: Ion charge state. Defaults to 1.
+            mods: Optional modifications.
+
+        Note:
+        `mods` accepts several input formats:
+
+        - **None** — no modification applied.
+        - **str** — a single named modification e.g. `'methyl'`.
+        - **dict** — elemental changes e.g. `{'C': 1, 'O':1, 'H': -2}`.
+        - **list** — multiple named modifications, which can be either strings or dicts e.g. `['methyl', `{'C': 1, 'O':1, 'H': -2}`]`.
+
+        Modifications given as strings are resolved via `KNOWN_MODIFICATIONS` on the subclass.
+        For `Oligo`, valid names include `'methyl'`, `'PS'`, `'3P'`, `'5PPP'`, etc.
+        See `Oligo.KNOWN_MODIFICATIONS` for the full list.
+
+        Attributes:
+            name: Human-readable name for the analyte.
+            mods: A record of any modifications applied to the molecule, in the format they were given as input.
+            composition: Final elemental composition as a dict, including any modifications.
+            charge: Ion charge state.
+            monoisotopic_mass: Mass of the most abundant isotopologue in Daltons,
+                rounded to 3 decimal places.
+            average_mass: Intensity-weighted average mass across the isotopic
+                distribution, rounded to 3 decimal places.
+            isotopic_distribution: Full isotopic distribution as a list of peaks,
+                each with `.mz` and `.intensity` attributes.
+            iso_dist_range: Defaults to a tuple of (start, end) mass range covering 95% of the
+                isotopic signal, with 10 Da padding on each side.
+
+        """
+
         self.name = name
-        self.custom_mods = mods
+        self.mods = mods
         self.charge = charge    # Assumes this is a +1 charged ion
         self.composition = self._chem_composition(composition, mods)
         self.isotopic_distribution = self._calc_iso_dist()
@@ -17,6 +59,7 @@ class Analyte:
         return self.name
 
     def composition_str(self):
+        """Returns a string representation of the elemental composition, i.e. C146 H182 N67 O85 P15"""
         return " ".join([k + str(v) for k,v in self.composition.items()])
 
     def _resolve_modifications(self, mods, known_modifications: dict) -> dict | None:
@@ -99,6 +142,10 @@ class Analyte:
         return round(avg_mass, 3)
 
     def iso_dist_plot(self, ax=None, y_max=None, annotate=True, label='Theoretical', colour='#d1495b', cumulative_threshold=0.99999) -> plt.axes:
+        """
+        Test
+
+        """
         x = []
         y = []
 

@@ -27,10 +27,14 @@ plugins:
 
 nav:
   - Home: index.md
+  - Guides:
+    - Planning an Experiment: guides/plan-experiment.md
+    - Analyzing an Experiment: guides/analyze-experiment.md
+    - Scoring Enzymes: guides/score-enzymes.md
   - API Reference:
-    - analytes: api/analytes.md
-    - experiment: api/experiment.md
-    - helper: api/helper.md
-    - metadata: api/metadata.md
-    - quant: api/quant.md
-    - sample: api/sample.md
+    - Analytes: api/analytes.md
+    - Experiment: api/experiment.md
+    - Helper: api/helper.md
+    - Metadata: api/metadata.md
+    - Scoring: api/scoring.md
+    - Sample: api/sample.md
