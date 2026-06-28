@@ -9,6 +9,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tck
 
+# TODO: break experiment into different abstraction layers
+# higher abstraction = collection, makes no assumption about positioning, # of samples, or naming
+# lower abstraction = plate, assumes 384-well plate
+
+# TODO: implement peak matching algorithms
+    # exploratory - sample to sample comparisons
+    # directed - sample to analyte comparisons
+
 
 class Experiment:
     def __init__(self, data_folder=None, noise_cutoff=0.95):
@@ -314,7 +322,7 @@ class Experiment:
             sample = self.samples[well]
 
             if overlay:
-                ax = axs[1]
+                ax = axs
             else:
                 ax = axs[n]
 

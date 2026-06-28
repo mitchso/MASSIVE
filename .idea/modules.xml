@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/oligo_maldi.iml" filepath="$PROJECT_DIR$/.idea/oligo_maldi.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/MASSIVE.iml" filepath="$PROJECT_DIR$/.idea/MASSIVE.iml" />
     </modules>
   </component>
 </project>

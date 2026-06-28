@@ -1,6 +1,24 @@
 from scipy.signal import savgol_filter
 from scipy.signal import find_peaks
+from matplotlib.collections import LineCollection
 
+
+colour_dict = {'dark grey': '#333333',
+               'grey': '#737373',
+               'light grey': '#b3b3b3',
+               'lighter grey': '#e6e6e6',
+
+               'dark blue': '#007aed',
+               'blue': '#5fa8ed',
+               'light blue': '#bed6ed',
+
+               'dark red': '#ff2700',
+               'red': '#ff7d66',
+               'light red': '#ffd4cc',
+
+               'dark green': '#44cc00',
+               'green': '#7acc52',
+               'light green': '#b1cca3'}
 
 def savitzky_golay(i: list, window=15, polyorder=3):
     return savgol_filter(i, window_length=window, polyorder=polyorder)
@@ -89,20 +107,21 @@ def _find_colour_segments(colour_array) -> dict:
     colour_segments = {}
 
     current_colour = colour_array[0]
-    current_segment = [0]
+    segment_start = 0
     for index, colour in enumerate(colour_array):
         if colour != current_colour:
-            current_segment.append(index)
-            colour_segments[tuple(current_segment)] = current_colour
+            segment_end = index-1
+            colour_segments[(segment_start, segment_end)] = current_colour
             current_colour = colour
-            current_segment = [index]
+            segment_start = index
         else:
             continue # just do nothing
 
     # Close the final segment
-    current_segment.append(len(colour_array))
-    colour_segments[tuple(current_segment)] = current_colour
+    segment_end = len(colour_array)
+    colour_segments[segment_start, segment_end] = current_colour
 
+    print(colour_segments)
     return colour_segments
 
 
@@ -114,7 +133,7 @@ def _plot_segmented(axis, mz, i, colour_array, linewidth=1.5):
     """
     colour_segments = _find_colour_segments(colour_array)
     for (seg_start, seg_end), colour in colour_segments.items():
-        axis.plot(mz[seg_start:], i[seg_start:], c=colour, linewidth=linewidth, label='Experimental')
+        axis.plot(mz[seg_start:seg_end], i[seg_start:seg_end], c=colour, linewidth=linewidth, label='Experimental')
 
 
 def get_nested_attr(object, attr):

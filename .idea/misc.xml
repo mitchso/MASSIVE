@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="Black">
-    <option name="sdkName" value="Python 3.13 (oligo_maldi)" />
+    <option name="sdkName" value="Python 3.13 (MASSIVE)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="oligo_maldi" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="/opt/miniconda3/envs/MASSIVE" project-jdk-type="Python SDK" />
 </project>

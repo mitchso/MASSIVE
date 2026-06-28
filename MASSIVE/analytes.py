@@ -3,11 +3,11 @@ from brainpy import isotopic_variants
 
 
 class Analyte:
-    def __init__(self, name, composition, charge=1, custom_mods=None):
+    def __init__(self, name, composition, charge=1, mods=None):
         self.name = name
-        self.custom_mods = custom_mods
+        self.custom_mods = mods
         self.charge = charge    # Assumes this is a +1 charged ion
-        self.composition = self._chem_composition(composition, custom_mods)
+        self.composition = self._chem_composition(composition, mods)
         self.isotopic_distribution = self._calc_iso_dist()
         self.iso_dist_range = self._calc_iso_dist_range()
         self.monoisotopic_mass = self._calc_monoisotopic_mass()
@@ -19,18 +19,56 @@ class Analyte:
     def composition_str(self):
         return " ".join([k + str(v) for k,v in self.composition.items()])
 
-    def _chem_composition(self, composition:dict, custom_mods:dict=None) -> dict:
+    def _resolve_modifications(self, mods, known_modifications: dict) -> dict | None:
+        """
+        Resolves modification names into elemental compositions.
+
+        mods can be:
+          - None
+          - a string: 'methyl'
+          - a list of strings: ['methyl', '3phos']
+          - a dict (already resolved): {'C': 1, 'H': 2, ...}
+        """
+        # Already a resolved elemental composition — pass through
+        if isinstance(mods, dict) or mods is None:
+            return mods
+
+        # make sure mods is a list
+        if not isinstance(mods, list):
+            mods = [mods]
+
+        resolved = {}
+        for mod in mods:
+            if isinstance(mod, dict):
+                for element, count in mod.items():
+                    resolved[element] = resolved.get(element, 0) + count
+
+            elif isinstance(mod, str):
+                if mod in known_modifications:
+                    for element, count in known_modifications[mod].items():
+                        resolved[element] = resolved.get(element, 0) + count
+                else:
+                    raise ValueError(
+                        f"Unknown modification '{mod}'. "
+                        f"Known modifications are listed in the KNOWN_MODIFICATIONS class attribute."
+                    )
+
+        return resolved
+
+
+    def _chem_composition(self, composition:dict, mods: dict | None=None) -> dict:
         """
         Takes a base chemical composition and combines it with any custom modifications.
         """
-        if custom_mods is None:
-            custom_mods = {}    # make it a dict so that we can treat it like one
+        if mods is None:
+            mods = {}    # make it a dict so that we can treat it like one
 
-        all_elements = set(composition.keys()) | set(custom_mods.keys())
+        # get all elements used between the base oligo and the modifications
+        all_elements = set(composition.keys()) | set(mods.keys())
 
         final_comp = {e: 0 for e in all_elements}
 
-        for dictionary in [composition, custom_mods]:
+        for dictionary in [composition, mods]:
             for element, value in dictionary.items():
                 final_comp[element] += value
 
@@ -83,7 +121,7 @@ class Analyte:
             plt.ylabel(f'Intensity (au)')
             plt.xlabel('m/z')
 
-        ax.stem(x, y, markerfmt='.', linefmt=colour, label=label)
+        ax.stem(x, y, markerfmt='.', basefmt=colour, linefmt=colour, label=label)
 
         if annotate:
             for x,y in zip(x, y):
@@ -150,61 +188,98 @@ class Analyte:
 
 
 class Oligo(Analyte):
-    def __init__(self, name, seq: str, type='DNA', five_prime_end='OH', charge=1, custom_mods=None):
+    BASES = {
+        'A': {'C': 10, 'H': 13, 'N': 5, 'O': 4, 'P': 0},
+        'T': {'C': 10, 'H': 14, 'N': 2, 'O': 6, 'P': 0},
+        'C': {'C': 9,  'H': 13, 'N': 3, 'O': 5, 'P': 0},
+        'G': {'C': 10, 'H': 13, 'N': 5, 'O': 5, 'P': 0},
+        'U': {'C': 9,  'H': 12, 'N': 2, 'O': 6, 'P': 0},
+        'I': {'C': 10, 'H': 12, 'N': 4, 'O': 5, 'P': 0},
+    }
+
+    BONDS = {
+        'PO': {'C': 0, 'H': -1, 'N': 0, 'O': 2, 'P': 1, 'S': 0}
+    }
+
+    KNOWN_MODIFICATIONS = {
+        'methyl':           {'C': 1, 'H': 2, 'N': 0, 'O': 0, 'P': 0, 'S': 0},
+        'hydroxymethyl':    {'C': 1, 'H': 3, 'N': 0, 'O': 1, 'P': 0, 'S': 0},
+        'formyl':           {'C': 1, 'H': 1, 'N': 0, 'O': 1, 'P': 0, 'S': 0},
+        'carboxy':          {'C': 1, 'H': 0, 'N': 0, 'O': 2, 'P': 0, 'S': 0},
+        'PS':               {'C': 0, 'H': 0, 'N': 0, 'O': -1, 'P': 0, 'S': 1},
+        'adenylation':      {'C': 10, 'H': 14, 'N': 5, 'O': 5, 'P': 1, 'S': 0},
+        '3P':               {'C': 0, 'H': 1, 'N': 0, 'O': 3, 'P': 1, 'S': 0},
+        '5P':               {'C': 0, 'H': 1, 'N': 0, 'O': 3, 'P': 1, 'S': 0},
+        '5PP':              {'C': 0, 'H': 2, 'N': 0, 'O': 6, 'P': 2, 'S': 0},
+        '5PPP':             {'C': 0, 'H': 3, 'N': 0, 'O': 9, 'P': 3, 'S': 0},
+        '5AmMC12':          {'C': 12, 'H': 26, 'N': 1, 'O': 3, 'P': 1, 'S': 0}   # IDT
+    }
+
+    def __init__(self, name, seq: str, type='DNA', charge=1, mods=None):
         # set up oligo specific attributes
         self.seq = seq
         self.type = type
-        self.five_prime_end = five_prime_end
 
         # use these to calculate elemental composition
         composition = self._oligo_composition()
+        mods = self._resolve_modifications(mods, self.KNOWN_MODIFICATIONS)
+
 
         # pass this elemental composition to the base Analyte class
-        super().__init__(name, composition, charge, custom_mods)
+        super().__init__(name, composition, charge, mods)
 
     def _oligo_composition(self) -> dict:
         """
         Takes an oligo sequence and returns an elemental composition map.
         """
+        if len(self.seq) < 1:
+            raise ValueError("Oligo sequence must be at least one base long.")
 
-        bases = {'A': {'C': 10, 'H': 13, 'N': 5, 'O': 3, 'P': 0, 'S': 0},
-                 'T': {'C': 10, 'H': 14, 'N': 2, 'O': 5, 'P': 0, 'S': 0},
-                 'C': {'C': 9, 'H': 13, 'N': 3, 'O': 4, 'P': 0, 'S': 0},
-                 'G': {'C': 10, 'H': 13, 'N': 5, 'O': 4, 'P': 0, 'S': 0}
-                 }
-
-        ends = {'OH': {'C': 0, 'H': 0, 'N': 0, 'O': 0, 'P': 0, 'S': 0},
-                'P': {'C': 0, 'H': 1, 'N': 0, 'O': 3, 'P': 1, 'S': 0},
-                'PP': {'C': 0, 'H': 2, 'N': 0, 'O': 6, 'P': 2, 'S': 0},
-                'PPP': {'C': 0, 'H': 3, 'N': 0, 'O': 9, 'P': 3, 'S': 0}
-                }
-
-        bonds = {'PS': {'C': 0, 'H': 0, 'N': 0, 'O': -1, 'P': 0, 'S': 1},  # Difference relative to PO bond
-                 'PO': {'C': 0, 'H': -1, 'N': 0, 'O': 2, 'P': 1, 'S': 0}
-                 }
-
-        final_comp = {'C': 0, 'H': 0, 'N': 0, 'O': 0, 'P': 0, 'S': 0}
+        composition = {'C': 0, 'H': 0, 'N': 0, 'O': 0, 'P': 0}
 
         # Add up base compositions
-        for n in self.seq:
-            for k, v in final_comp.items():
-                final_comp[k] += bases[n][k]
+        for N in self.seq:
+            for ele in composition.keys():
+                composition[ele] += self.BASES[N][ele]
 
         # type adjustment
         if self.type == 'DNA':
-            pass
+            composition['O'] -= len(self.seq)   # remove 1 oxygen per base
         elif self.type == 'RNA':
-            final_comp['O'] += len(self.seq)
+            pass
         else:
             raise NotImplementedError("Unexpected Oligo.type")
 
         # Add phosphodiester bonds
         po_bonds = len(self.seq)-1
-        for k, v in final_comp.items():
-            final_comp[k] += bonds['PO'][k] * po_bonds
+        for ele in composition.keys():
+            composition[ele] += self.BONDS['PO'][ele] * po_bonds
 
-        # Make end adjustments
-        for k, v in final_comp.items():
-            final_comp[k] += ends[self.five_prime_end][k]
+        return composition
 
-        return final_comp
+
+# TODO: build this class
+class Peptide(Analyte):
+    AMINO_ACIDS = {}
+
+    BONDS = {}
+
+    KNOWN_MODIFICATIONS = {}
+
+    def __init__(self, name, seq: str, charge=1, mods=None):
+        self.seq = seq
+
+        # use these to calculate elemental composition
+        composition = self._peptide_composition()
+        mods = self._resolve_modifications(mods, self.KNOWN_MODIFICATIONS)
+
+        # pass this elemental composition to the base Analyte class
+        super().__init__(name, composition, charge, mods)
+
+    def _peptide_composition(self) -> dict:
+        """
+        Takes an oligo sequence and returns an elemental composition map.
+        """
+        composition = {'C': 0, 'H': 0, 'N': 0, 'O': 0, 'P': 0, 'S': 0}
+
+        return composition  # stub

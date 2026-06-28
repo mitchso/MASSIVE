@@ -4,6 +4,10 @@ import random
 from . import helper
 from . import analytes
 
+# TODO: implement actual baseline subtraction algorithms
+# TODO: implement actual peak identification algorithms
+# TODO: improve peak intensity calling
+# TODO: implement peak area calculation and visualization
 
 class Sample:
     def __init__(self, file, well, mz, i, noise_cutoff: float, chip=0, mz_offset=0):
@@ -27,11 +31,6 @@ class Sample:
 
         self.noise = self._calculate_noise(self.noise_cutoff)
         self._filter_i()   # populates self.i_filtered
-
-        # params for plotting
-        self.total_ion = sum(self.i)
-        self.max_i = max(self.i)
-        self.num_points = len(self.i)
 
     def recalc_mz(self):
         """Updates self.mz, useful when mz_offset has been changed."""
