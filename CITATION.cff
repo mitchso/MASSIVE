@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+title: MASSIVE
+message: "If you use this software, please cite it as below."
+type: software
+authors:
+  - family-names: Syberg-Olsen
+    given-names: Mitchell J.
+  - family-names: Tabor
+    given-names: Jeffrey J.
+repository-code: "https://github.com/mitchso/MASSIVE"
+url: "https://mitchso.github.io/MASSIVE/"
+abstract: "MALDI-ToF Analysis & Scoring Software for In Vitro Experiments"
+license: MIT
+version: 0.1.0-dev
+date-released: "2026-06-27"
