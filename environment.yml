@@ -1,0 +1,17 @@
+name: MASSIVE
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python>=3.10
+  - biopython
+  - matplotlib
+  - numpy
+  - openpyxl
+  - pandas
+  - scipy
+  - seaborn
+  - xlsxwriter
+  - pip
+  - pip:
+      - brain-isotopic-distribution
