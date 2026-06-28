@@ -1,6 +1,6 @@
 # MASSIVE
 
-**<u>M</u>**ALDI-ToF **<u>A</u>**nalysis & **<u>S</u>**coring **<u>S</u>**oftware for **<u>I</u>**n **<u>V</u>**itro **<u>E</u>**xperiments
+<b><u>M</u></b>ALDI-ToF <b><u>A</u></b>nalysis & <b><u>S</u></b>coring <b><u>S</u></b>oftware for <b><u>I</u></b>n <b><u>V</u></b>itro <b><u>E</u></b>xperiments
 
 Software for visualizing and quantifying known analytes in MALDI-ToF Mass Spectrometry experiments
 
