@@ -1,0 +1,3 @@
+# Collections
+
+::: MASSIVE.collections

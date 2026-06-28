@@ -35,8 +35,8 @@ nav:
     - Scoring Enzymes: guides/score-enzymes.md
   - API:
     - Analytes: api/analytes.md
-    - Experiment: api/experiment.md
-    - Helper: api/helper.md
-    - Metadata: api/metadata.md
-    - Scoring: api/scoring.md
     - Sample: api/sample.md
+    - Collections: api/collections.md
+    - Scoring: api/scoring.md
+    - Metadata: api/metadata.md
+    - Helper: api/helper.md

@@ -1,8 +1,10 @@
 import matplotlib.pyplot as plt
+import matplotlib.axes
 import numpy as np
 import random
 from . import helper
 from . import analytes
+from typing import Literal
 
 # TODO: implement actual baseline subtraction algorithms
 # TODO: implement actual peak identification algorithms
@@ -10,11 +12,48 @@ from . import analytes
 # TODO: implement peak area calculation and visualization
 
 class Sample:
-    def __init__(self, file, well, mz, i, noise_cutoff: float, chip=0, mz_offset=0):
+    """
+    Represents a single MALDI-ToF spectrum.
+
+    `Sample` can be assigned a list of [`Analytes`][MASSIVE.analytes.Analyte], which then enables each Analyte to be automatically detected and quantified.
+
+    Additionally, `Sample` objects can be assigned to a [`Collection`][MASSIVE.collections.Collection], which then enables the groups of samples to be visualized and analyzed together.
+
+    When creating a [`Collection`][MASSIVE.collections.Collection], `Sample` objects are generated automatically from the data files.
+    This is the typical workflow, but it is also possible to manually create `Sample` objects if you wish.
+    """
+    def __init__(self, file:str, id:str, mz:list[float], i:list[float], noise_cutoff: float=0.95, chip:Literal[0,1]=0, mz_offset:float=0):
+        """
+
+        Args:
+            file: Data file path (see [Input data formatting assistance](../guides/data_formatting.md))
+            id: Unique sample identifier. For samples on a [`Plate`][MASSIVE.collections.Plate], this should be the position of the sample on the plate (e.g. 'A1')
+            mz: m/z values of the spectrum, encoded as a list of floats.
+            i: Intensity values of the spectrum, encoded as a list of floats.
+            noise_cutoff: The noise cutoff value used to filter out low-signal data points. At 0.95, every intensity value along the spectrum except for the highest 5% is set to 0. This can be tuned to eliminate noise at low signal intensities.
+            chip: Bruker MALDI-ToF plates are divided into two 'chips', where 0 refers to regular sample spots and 1 refers to calibrant spots.
+            mz_offset: Used to manually adjust the spectra if calibration is off. This adjustment simply slides the spectra by the given value along the x-axis.
+
+        Attributes:
+            file (str): Data file path (see [Input data formatting assistance](../guides/data_formatting.md))
+            chip (int): Bruker MALDI-ToF plates are divided into two 'chips', where 0 refers to regular sample spots and 1 refers to calibrant spots.
+            id (str): Unique sample identifier. For samples on a [`Plate`][MASSIVE.collections.Plate], this should be the position of the sample on the plate (e.g. 'A1')
+            name (str): Human-readable name of the sample (defaults to `self.id`, can be changed by the user)
+            noise_cutoff (float): The noise cutoff value used to filter out low-signal data points.
+            background (float): Background signal level of the spectrum.
+            noise (float): Noise of the spectrum (anything below this value is considered noise).
+            analytes (list): List of [`Analytes`][MASSIVE.analytes.Analyte] to search for in the sample.
+            mz_raw (list): Original m/z values of the spectrum, encoded as a list of floats. Unaffected by `mz_offset`.
+            mz (list): Adjusted m/z values of the spectrum, encoded as a list of floats. Adjusted by `mz_offset`. If `mz_offset` is changed after initializing the object, you must call `self.recalc_mz()` to update this attribute.
+            i (list): Intensity values of the spectrum, encoded as a list of floats.
+            i_bg_subtracted (list): Background subtracted intensity values of the spectrum, encoded as a list of floats.
+            i_filtered (list): Intensity values of the spectrum, anything below `noise` set to 0, encoded as a list of floats.
+        """
+
         self.file = file  # source data file
         self.chip = chip    # for AnchorChip plates, chip=0 refers to regular sample spots and chip=1 refers to calibrant spots
-        self.well = well
-        self.name = self.well   # default naming but this can be changed
+        self.id = id
+        self.name = self.id   # default naming but this can be changed
         self.noise_cutoff = noise_cutoff
         self.mz_offset = mz_offset  # used to manually adjust the spectra if calibration is off.
         self.analytes = []
@@ -33,15 +72,16 @@ class Sample:
         self._filter_i()   # populates self.i_filtered
 
     def recalc_mz(self):
-        """Updates self.mz, useful when mz_offset has been changed."""
+        """Updates self.mz to align with the current `self.mz_offset` value."""
         self.mz = [point + self.mz_offset for point in self.mz_raw]
+        return True
 
     def _collect_attributes(self):
         """
         Collects all attributes of the Sample object and returns them as a dictionary.
         Excludes attributes that are only meant to be seen internally.
         """
-        include = ['file', 'chip', 'well', 'name', 'noise_cutoff', 'mz_offset', 'background', 'noise']
+        include = ['file', 'chip', 'id', 'name', 'noise_cutoff', 'mz_offset', 'background', 'noise']
         exclude = ['misc_conditions', 'analytes', 'mz_raw', 'mz', 'i', 'i_bg_subtracted', 'i_filtered', 'total_ion',
                    'max_i', 'num_points']
 
@@ -60,13 +100,13 @@ class Sample:
 
     def analyte_intensities(self) -> list[tuple]:
         """
-        Returns a list of tuples: (molecule name, intensity value), one for each molecule of interest.
-        The intensity value is determined by Oligo.mai_intensity()
+        Returns a list of tuples: (analyte name, intensity value), one for each molecule of interest.
+        The intensity value is determined by [`Analyte`][MASSIVE.analytes.Analyte]`._peak_intensity()`.
         """
         intensities = []
         for a in self.analytes:
             intensities.append(
-                (a.name, a._mai_intensity(sample=self))
+                (a.name, a._peak_intensity(sample=self))
             )
         return intensities
 
@@ -100,9 +140,10 @@ class Sample:
 
         self.i_filtered = i_filtered
 
-    def plot_distance_between_points(self) -> plt.axes:
+    def plot_distance_between_points(self) -> matplotlib.axes.Axes:
         """
         Generates a plot of the distance (daltons) between each data point collected in the spectrum.
+        This can be revealing for understanding how your instrument creates m/z bins.
         """
         delta_mz = []
         i = 1
@@ -120,7 +161,7 @@ class Sample:
 
 
     # TODO: make this the main plot that gets called by Experiment
-    def sorted_signal_plot(self) -> plt.axes:
+    def sorted_signal_plot(self) -> matplotlib.axes.Axes:
         """
         Generates # TODO finish describing.
         """
@@ -147,22 +188,20 @@ class Sample:
 
         return fig, ax
 
-    def plot_analyte(self, analyte: analytes.Analyte, filtered=True) -> plt.axes:
+    def plot_analyte(self, analyte: analytes.Analyte, filtered:bool=True) -> matplotlib.axes.Axes:
         """
         Generates a plot for an analyte, zoomed in to visualize the isotope distribution and mass accuracy.
         """
         return self.plot(xlim=analyte.iso_dist_range,
-                         relative=True,
                          theoretical_dist=True,
                          filtered=filtered,
                          label_analytes=False,
-                         title=f"{analyte.name}, monoisotopic mass = {analyte.monoisotopic_mass}, charge = +{analyte.charge}")
-
+                         title=f"{analyte.name}, monoisotopic mass = {analyte.monoisotopic_mass}, charge = {analyte.charge}")
 
 
     def _base_plotter(
             self,
-            ax=plt.axes,
+            ax=matplotlib.axes.Axes,
             xlim=None,
             filtered=False,
             smoothed=False,
@@ -194,7 +233,7 @@ class Sample:
                                                    i=i_plot)
 
         if smoothed:    # apply a savitzky-golay filter
-            i_plot = helper.savitzky_golay(i=i_plot)
+            i_plot = helper._savitzky_golay(i=i_plot)
 
         if normalized:  # normalize to 100 as maximum value
             try:
@@ -205,7 +244,6 @@ class Sample:
 
         if overlay: # apply a random scaling to prevent overlapping lines from becoming unreadable
             i_plot = [i * random.uniform(0.90, 1.00) for i in i_plot]
-
 
 
         ### Assign a colour to every data point
@@ -279,26 +317,48 @@ class Sample:
 
     def plot(
             self,
-            xlim=None,
-            normalized=False,
-            label_peaks=False,
-            theoretical_dist=False,
-            highlight_analytes=True,
-            label_analytes=True,
-            filtered=False,
-            smoothed=False,
-            title=None,
-            custom_colours=None,
-            base_colour='#1f77b4',
-            analyte_colour='#d1495b',
-            theoretical_colour='#CC6677',
-            linewidth=1.5,
-            ax=None,
-            figsize=(8, 3)
-    ) -> plt.axes:
+            xlim:tuple=None,
+            normalized:bool=False,
+            label_peaks:bool=False,
+            theoretical_dist:bool=False,
+            highlight_analytes:bool=True,
+            label_analytes:bool=True,
+            filtered:bool=False,
+            smoothed:bool=False,
+            title:str|None=None,
+            custom_colours:dict|None=None,
+            base_colour:str='#1f77b4',
+            analyte_colour:str='#d1495b',
+            theoretical_colour:str='#CC6677',
+            linewidth:float=1.5,
+            ax:matplotlib.axes.Axes|None=None,
+            figsize:tuple=(8, 3)
+    ) -> matplotlib.axes.Axes:
 
         """
-        General purpose plotting function for a Sample's spectrum.
+        Main plotting function for [`Sample`][MASSIVE.sample.Sample]. Highly customizable, includes automatic highlighting and labeling of `Analytes` contained in `Sample.analytes`.
+
+        Each position is assigned exactly one colour by priority:
+            base_colour < analyte_colour < custom_colour
+
+        Args:
+            xlim: X-axis limits.
+            normalized: Converts y-axis values to relative intensities (au) between 0 and 100.
+            label_peaks: Auto-detect and label peaks in the spectrum.
+            theoretical_dist: Overlays the spectrum with theoretical isotope distributions for each `Analyte` in `Sample.analytes`.
+            highlight_analytes: Highlights the area in the spectrum where each `Analyte` is located.
+            label_analytes: Labels each `Analyte` with `Analyte.name`.
+            filtered: If `True`, only plot data points above the noise cutoff. If `False`, plot all data points.
+            smoothed: Apply a savitzky-golay filter to the spectrum.
+            title: Optional title for the plot.
+            custom_colours: Dictionary of custom colour ranges, e.g. {(100, 200): 'red', (200, 300): 'blue'}. Enables the user to bring attention to specified locations on the spectrum.
+            base_colour: Base colour of the plot.
+            analyte_colour: Colour for areas covered by `highlight_analytes`.
+            theoretical_colour: Colour for the theoretical isotope distributions.
+            linewidth: Line width of the plot.
+            ax: Optional matplotlib axes object. If not provided, a new figure and axes object will be created.
+            figsize: Figure size.
+
         """
         ### Settings
         if theoretical_dist:
@@ -333,7 +393,7 @@ class Sample:
 
         if theoretical_dist:   # Overlay theoretical isotope distributions
             for a in self.analytes:
-                a.iso_dist_plot(ax=ax, y_max=100, colour=theoretical_colour, annotate=False)
+                a.plot(ax=ax, y_max=100, colour=theoretical_colour, annotate=False)
 
             # Create a legend
             handles, labels = plt.gca().get_legend_handles_labels()

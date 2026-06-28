@@ -1,6 +1,15 @@
+"""
+Helper functions for MASSIVE.
+
+Warning:
+    This section is under active development and is not yet documented. Come back later :)
+"""
+
+
 from scipy.signal import savgol_filter
 from scipy.signal import find_peaks
 from matplotlib.collections import LineCollection
+
 
 
 colour_dict = {'dark grey': '#333333',
@@ -20,7 +29,7 @@ colour_dict = {'dark grey': '#333333',
                'green': '#7acc52',
                'light green': '#b1cca3'}
 
-def savitzky_golay(i: list, window=15, polyorder=3):
+def _savitzky_golay(i: list, window=15, polyorder=3):
     return savgol_filter(i, window_length=window, polyorder=polyorder)
 
 
@@ -110,18 +119,15 @@ def _find_colour_segments(colour_array) -> dict:
     segment_start = 0
     for index, colour in enumerate(colour_array):
         if colour != current_colour:
-            segment_end = index-1
-            colour_segments[(segment_start, segment_end)] = current_colour
+            colour_segments[(segment_start, index+1)] = current_colour
             current_colour = colour
             segment_start = index
         else:
             continue # just do nothing
 
     # Close the final segment
-    segment_end = len(colour_array)
-    colour_segments[segment_start, segment_end] = current_colour
+    colour_segments[(segment_start, len(colour_array))] = current_colour
 
-    print(colour_segments)
     return colour_segments
 
 
@@ -136,7 +142,7 @@ def _plot_segmented(axis, mz, i, colour_array, linewidth=1.5):
         axis.plot(mz[seg_start:seg_end], i[seg_start:seg_end], c=colour, linewidth=linewidth, label='Experimental')
 
 
-def get_nested_attr(object, attr):
+def _get_nested_attr(object, attr):
     """Helper function for show_sample_positions. Takes a nested attribute string and finds the value.
     i.e. 'enzyme.id' will return the ID of a particular enzyme."""
 

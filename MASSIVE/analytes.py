@@ -1,21 +1,24 @@
 import matplotlib.pyplot as plt
+import matplotlib.axes
 from brainpy import isotopic_variants
 
 
 class Analyte:
     """
-    Base class representing any molecule with a specific elemental composition.
+    Base class representing a molecule with a defined elemental composition.
 
-    Attributes such as monoisotopic mass, average mass, and isotopic distribution are automatically calculated.
+    The molecule's monoisotopic mass, average mass, and isotopic distribution are automatically calculated (see `Attributes`).
 
-    The base Analyte class is typically useful for small molecules, while the subclasses Oligo and Peptide are helpful for defining larger molecules in terms of their sequences (i.e. 'ACTGTA') and their modifications (i.e. methylation, phosphorylation)
+    Analytes can be assigned to [`Sample`][MASSIVE.sample.Sample] objects ([`Sample`][MASSIVE.sample.Sample].analytes), which then enables the Analyte to be automatically detected and quantified.
+
+    The base Analyte class is typically used for small molecules, while the subclasses [`Oligo`][MASSIVE.analytes.Oligo] and [`Peptide`][MASSIVE.analytes.Peptide] are helpful abstractions for defining larger molecules in terms of their sequences (i.e. 'ACTGTA') and their modifications (i.e. methylation, phosphorylation)
     """
-    def __init__(self, name:str, composition:dict, charge:int=1, mods:None|list|dict|str=None):
+    def __init__(self, name:str, composition:dict, charge:int = +1, mods:None|list|dict|str=None):
         """
         Args:
             name: Human-readable name for the analyte.
             composition: Elemental composition as a dict e.g. {'C': 10, 'H': 13, 'N': 5}.
-            charge: Ion charge state. Defaults to 1.
+            charge: Ion charge state. Defaults to a singly charged positive ion.
             mods: Optional modifications.
 
         Note:
@@ -24,24 +27,26 @@ class Analyte:
         - **None** — no modification applied.
         - **str** — a single named modification e.g. `'methyl'`.
         - **dict** — elemental changes e.g. `{'C': 1, 'O':1, 'H': -2}`.
-        - **list** — multiple named modifications, which can be either strings or dicts e.g. `['methyl', `{'C': 1, 'O':1, 'H': -2}`]`.
+        - **list** — multiple modifications, which can be either strings or dicts e.g. `['methyl', `{'C': 1, 'O':1, 'H': -2}`]`.
 
-        Modifications given as strings are resolved via `KNOWN_MODIFICATIONS` on the subclass.
-        For `Oligo`, valid names include `'methyl'`, `'PS'`, `'3P'`, `'5PPP'`, etc.
-        See `Oligo.KNOWN_MODIFICATIONS` for the full list.
+        Modifications given as strings are resolved depending on the subclass.
+        `Oligo` and `Peptide` have their own sets of modifications, while `Analyte` is too broad to reasonably define a set of modifications, so none are accepted.
+        See subclasses such as [`Oligo`][MASSIVE.analytes.Oligo] for more details.
+
+        Each item in a list of modifications is resolved additively, according to the logic above.
 
         Attributes:
-            name: Human-readable name for the analyte.
-            mods: A record of any modifications applied to the molecule, in the format they were given as input.
-            composition: Final elemental composition as a dict, including any modifications.
-            charge: Ion charge state.
-            monoisotopic_mass: Mass of the most abundant isotopologue in Daltons,
+            name (str): Human-readable name for the analyte.
+            mods (None|list|dict|str): A record of any modifications applied to the molecule, in the format they were given as input.
+            composition (dict): Final elemental composition as a dict, including any modifications.
+            charge (int): Ion charge state.
+            monoisotopic_mass (float): Mass of the most abundant isotopologue in Daltons,
                 rounded to 3 decimal places.
-            average_mass: Intensity-weighted average mass across the isotopic
+            average_mass (float): Intensity-weighted average mass across the isotopic
                 distribution, rounded to 3 decimal places.
-            isotopic_distribution: Full isotopic distribution as a list of peaks,
+            isotopic_distribution (list): Full isotopic distribution as a list of peaks,
                 each with `.mz` and `.intensity` attributes.
-            iso_dist_range: Defaults to a tuple of (start, end) mass range covering 95% of the
+            iso_dist_range(tuple): Defaults to a tuple of (start, end) mass range covering 95% of the
                 isotopic signal, with 10 Da padding on each side.
 
         """
@@ -59,7 +64,7 @@ class Analyte:
         return self.name
 
     def composition_str(self):
-        """Returns a string representation of the elemental composition, i.e. C146 H182 N67 O85 P15"""
+        """Returns a string representation of the elemental composition, i.e. `C146 H182 N67 O85 P15`"""
         return " ".join([k + str(v) for k,v in self.composition.items()])
 
     def _resolve_modifications(self, mods, known_modifications: dict) -> dict | None:
@@ -141,9 +146,20 @@ class Analyte:
             avg_mass += peak.mz * peak.intensity
         return round(avg_mass, 3)
 
-    def iso_dist_plot(self, ax=None, y_max=None, annotate=True, label='Theoretical', colour='#d1495b', cumulative_threshold=0.99999) -> plt.axes:
+    def plot(self, ax:matplotlib.axes.Axes=None, y_max: int | float=None, annotate:bool=True, label:str= 'Theoretical', colour:str= '#d1495b', cumulative_threshold:float=0.99999) -> matplotlib.axes.Axes:
         """
-        Test
+        Generates a stem plot of the isotopic distribution of the molecule. Useful for visualizing the isotopic distribution.
+
+        Args:
+            ax: Optionally, provide an existing axes object to plot on. If no axes object is provided, a new figure and axes are created.
+            y_max: Optionally, provide a maximum y-axis value to scale the plot to.
+            annotate: If True, annotate each peak with its exact m/z value (2 decimal places).
+            label: Label for the plot legend.
+            colour: Colour for the stem plot.
+            cumulative_threshold: Cutoff for the isotopic distribution. Since distributions can have long tails, this keeps the plot more manageable.
+
+        Returns:
+            An axes object containing the stem plot.
 
         """
         x = []
@@ -205,9 +221,9 @@ class Analyte:
         cumulative_range = (min(cumulative_mz_vals)-left_pad, max(cumulative_mz_vals)+right_pad)
         return cumulative_range
 
-    def _mai_intensity(self, sample, i_type='filtered') -> float:
+    def _peak_intensity(self, sample, i_type='filtered') -> float:
         """
-        Returns the Most Abundant Isotope (MAI) intensity of this molecule in a given sample.
+        Returns the peak intensity of this molecule in a given sample.
         """
         if i_type == 'raw':
             i_vals = sample.i
@@ -235,6 +251,15 @@ class Analyte:
 
 
 class Oligo(Analyte):
+    """
+    Represents an oligonucleotide (DNA or RNA).
+
+    `Oligo` is useful for defining an analyte in terms of its nucleotide sequence, as well as any modifications (e.g. methylation, phosphorylation).
+
+    Common bases and modifications are defined in `Attributes`. These dictionaries can be expanded as you wish to include additional bases and modifications.
+    For `Oligo`, valid names include `'methyl'`, `'PS'`, `'3P'`, etc.
+
+    """
     BASES = {
         'A': {'C': 10, 'H': 13, 'N': 5, 'O': 4, 'P': 0},
         'T': {'C': 10, 'H': 14, 'N': 2, 'O': 6, 'P': 0},
@@ -262,7 +287,30 @@ class Oligo(Analyte):
         '5AmMC12':          {'C': 12, 'H': 26, 'N': 1, 'O': 3, 'P': 1, 'S': 0}   # IDT
     }
 
-    def __init__(self, name, seq: str, type='DNA', charge=1, mods=None):
+    def __init__(self, name:str, seq: str, type:str='DNA', charge:int = +1, mods:None|list|dict|str=None):
+        """
+        Args:
+            name: Human-readable name for the Oligo.
+            seq: Sequence of nucleotides, e.g. 'ACTGTA'.
+            type: `DNA` or `RNA`.
+            charge: Ion charge state. Defaults to singly charged positive ion.
+            mods: See [`Analyte`][MASSIVE.analytes.Analyte] for information about how to define modifications.
+
+
+        Attributes:
+            seq (str): Sequence of nucleotides, e.g. 'ACTGTA'.
+            type (str): `DNA` or `RNA`.
+            composition (dict): Elemental composition of the oligo, including any modifications.
+            mods (dict): Elemental composition of modifications applied to the oligo.
+            BASES (dict): Dictionary of nucleotides and their corresponding elemental compositions. Includes `'A', 'T', 'C', 'G', 'U', 'I'`. For an exact list and molecular compositions, see `Oligo.BASES` in the source code.
+            KNOWN_MODIFICATIONS (dict): Dictionary of modifications and their corresponding elemental composition changes. For an exact list and molecular compositions, see `Oligo.KNOWN_MODIFICATIONS` in the source code.
+
+        | Example | Description | Net elemental change |
+        |------|-------------|------------------|
+        | `methyl` | Methylation | C: +1, H: +2 (gain a carbon and 3 hydrogens but lose 1 hydrogen) |
+        | `PS` | Phosphorothioation | O: -1, S: +1 (replace oxygen with sulphur) |
+        """
+
         # set up oligo specific attributes
         self.seq = seq
         self.type = type
@@ -307,13 +355,40 @@ class Oligo(Analyte):
 
 # TODO: build this class
 class Peptide(Analyte):
+    """
+    <b>STILL UNDER CONSTRUCTION.</b>
+
+    Represents a peptide.
+
+    `Peptide` is useful for defining an analyte in terms of its amino acid sequence, as well as any modifications (e.g. methylation, phosphorylation).
+
+    Common amino acids and modifications are defined in `Attributes`. These dictionaries can be expanded as you wish to include additional bases and modifications.
+
+    """
+
     AMINO_ACIDS = {}
 
     BONDS = {}
 
     KNOWN_MODIFICATIONS = {}
 
-    def __init__(self, name, seq: str, charge=1, mods=None):
+    def __init__(self, name: str, seq: str, charge:int = +1, mods:None|list|dict|str=None):
+        """
+        Args:
+            name: Human-readable name for the Peptide.
+            seq: Sequence of amino acids, e.g. 'METKAV'.
+            charge: Ion charge state. Defaults to a singly charged positive ion.
+            mods: See [`Analyte`][MASSIVE.analytes.Analyte] for information about how to define modifications.
+
+        Attributes:
+            seq (str): Sequence of amino acids, e.g. 'METKAV'.
+            composition (dict): Elemental composition of the peptide, including any modifications.
+            mods (dict): Elemental composition of modifications applied to the peptide.
+            AMINO_ACIDS (dict): Dictionary of amino acids and their corresponding elemental compositions. For an exact list and molecular compositions, see `Oligo.AMINO_ACIDS` in the source code.
+            KNOWN_MODIFICATIONS (dict): Dictionary of modifications and their corresponding elemental composition changes. For an exact list and molecular compositions, see `Peptide.KNOWN_MODIFICATIONS` in the source code.
+
+        """
+
         self.seq = seq
 
         # use these to calculate elemental composition
