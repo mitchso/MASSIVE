@@ -11,6 +11,6 @@ For detailed documentation, please visit the [documentation page](https://mitchs
 
 ## Citation
 
-MASSIVE is still a work in progress, so there is no official publication. If it was useful for your work, you can cite it as: <br>
+MASSIVE is still a work in progress, so there is no official publication. 
 
-`Syberg-Olsen M.J. & Tabor, J.J. 2026: MASSIVE, GitHub repository: https://github.com/mitchso/MASSIVE`
+If it was useful for your work, please see the `Cite this repository` button in the `About` section of this page.
