@@ -1,9 +1,0 @@
-numpy==2.2.6
-pandas==2.2.3
-scipy==1.15.3
-matplotlib==3.10.3
-seaborn==0.13.2
-xlsxwriter==3.1.1
-brain-isotopic-distribution==1.5.19
-jupyter==1.1.1
-openpyxl==3.1.5

@@ -28,11 +28,12 @@ plugins:
 nav:
   - Home: index.md
   - Guides:
+    - Getting Started: guides/overview.md
     - Input data formatting assistance: guides/data_formatting.md
     - Planning an Experiment: guides/plan-experiment.md
     - Analyzing an Experiment: guides/analyze-experiment.md
     - Scoring Enzymes: guides/score-enzymes.md
-  - API Reference:
+  - API:
     - Analytes: api/analytes.md
     - Experiment: api/experiment.md
     - Helper: api/helper.md

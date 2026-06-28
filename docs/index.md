@@ -9,14 +9,10 @@ MASSIVE focuses on the use of MALDI-ToF in the context of in vitro experiments, 
 
 ##Installation
 1. Clone the repo
-2. Create and activate a new virtual environment, ideally with python 3.13.0
+2. Create a new conda environment and install dependencies:
 ```
-python3 -m venv [name]
-source [name]/bin/activate
-```
-3. Install dependencies
-```
-python -m pip install -r requirements.txt
+conda env create -f environment.yml
+conda activate MASSIVE
 ```
 
 ## Data requirements
@@ -47,5 +43,4 @@ i.e.
 See /data for example files.
 
 # Usage
-Analysis is mainly performed using four objects, Experiment, Sample, Oligo and Scoring.
-See notebooks contained in /demos for usage examples.
+Guides to using MASSIVE are coming soon! Stay tuned.
