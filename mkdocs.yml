@@ -28,6 +28,7 @@ plugins:
 nav:
   - Home: index.md
   - Guides:
+    - Input data formatting assistance: guides/data_formatting.md
     - Planning an Experiment: guides/plan-experiment.md
     - Analyzing an Experiment: guides/analyze-experiment.md
     - Scoring Enzymes: guides/score-enzymes.md

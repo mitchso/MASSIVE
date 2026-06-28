@@ -1,47 +1,14 @@
-Made in Python 3.13.0
-# Description
-Scripts for visualizing and quantifying nucleic acid MALDI experiments
+# MASSIVE
 
-# Installation
-1. Clone the repo
-2. Create and activate a new virtual environment, ideally with python 3.13.0
-```
-python3 -m venv [name]
-source [name]/bin/activate
-```
-3. Install dependencies
-```
-python -m pip install -r requirements.txt
-```
+**<u>M</u>**ALDI-ToF **<u>A</u>**nalysis & **<u>S</u>**coring **<u>S</u>**oftware for **<u>I</u>**n **<u>V</u>**itro **<u>E</u>**xperiments
 
-# Data requirements
-Data for each analysis should be provided as a folder of text files, where each text file corresponds to an individual mass spectrum.
+Software for visualizing and quantifying known analytes in MALDI-ToF Mass Spectrometry experiments
 
-Each text file should be named according to the following convention to ensure proper parsing:
-     [year]\_[month]\_[day]\_[run#]\_[chip#]\_[well]\_[replicate].txt \
-i.e. 2025_12_06_0001_0_E1_1.txt
+For detailed documentation, please visit the [documentation page](https://mitchso.github.io/MASSIVE/).
+[![Documentation](https://img.shields.io/badge/docs-github%20pages-blue)](https://mitchso.github.io/MASSIVE/)
 
-Where **[chip#]** refers to the 'chip' on a Bruker MALDI target (0 for regular positions, 1 for calibrant spots) and **[well]** refers to the position on the target (i.e. A1, G12, L23, etc). 
+## Citation
 
-The data inside the text file should be two columns without headers (m/z and intensity), separated by a single space:
+MASSIVE is still a work in progress, so there is no official publication. If it was useful for your work, you can cite it as: <br>
 
-i.e.
-```aiignore
-...
-3199.09 61672
-3199.43 64551
-3199.77 67041
-3200.11 69142
-3200.46 70855
-3200.80 72179
-3201.14 73115
-3201.48 73662
-...
-```
-
-See /data for example files.
-
-# Usage
-Analysis is mainly performed using four objects, Experiment, Sample, Oligo and DataProcessor.
-See notebooks contained in /demos for usage examples.
-
+`Syberg-Olsen M.J. & Tabor, J.J. 2026: MASSIVE, GitHub repository: https://github.com/mitchso/MASSIVE`
