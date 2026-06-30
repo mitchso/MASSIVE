@@ -1,3 +1,7 @@
+!!! warning
+    Current file format requirements are based on what we use in lab.
+    In the future, we will add support for other common file formats.
+
 # Data requirements
 Data for each analysis should be provided as a folder of text files, where each text file corresponds to an individual mass spectrum.
 

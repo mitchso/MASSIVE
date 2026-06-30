@@ -193,6 +193,11 @@ class Collection:
 
             if overlay:
                 ax = axs
+                custom_colours = None
+                base_colour = None
+                analyte_colour = None
+            elif len(ids) == 1:
+                ax = axs
             else:
                 ax = axs[n]
 

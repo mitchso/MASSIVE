@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
-import matplotlib.axes
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from brainpy import isotopic_variants
 
 
@@ -13,6 +14,8 @@ class Analyte:
 
     The base Analyte class is typically used for small molecules, while the subclasses [`Oligo`][MASSIVE.analytes.Oligo] and [`Peptide`][MASSIVE.analytes.Peptide] are helpful abstractions for defining larger molecules in terms of their sequences (i.e. 'ACTGTA') and their modifications (i.e. methylation, phosphorylation)
     """
+    KNOWN_MODIFICATIONS = {}
+
     def __init__(self, name:str, composition:dict, charge:int = +1, mods:None|list|dict|str=None):
         """
         Args:
@@ -56,7 +59,7 @@ class Analyte:
         self.charge = charge    # Assumes this is a +1 charged ion
         self.composition = self._chem_composition(composition, mods)
         self.isotopic_distribution = self._calc_iso_dist()
-        self.iso_dist_range = self._calc_iso_dist_range()
+        self.iso_dist_range = self.calc_iso_dist_range()
         self.monoisotopic_mass = self._calc_monoisotopic_mass()
         self.average_mass = self._calc_avg_mass()
 
@@ -122,11 +125,11 @@ class Analyte:
 
         return final_comp
 
-    def _calc_iso_dist(self, charge=0, error=0) -> tuple:
+    def _calc_iso_dist(self, error=0) -> tuple:
         """
         Calculates the isotopic distribution of a molecule
         """
-        dist = isotopic_variants(self.composition, charge=charge)
+        dist = isotopic_variants(self.composition, charge=self.charge)
         for peak in dist:
             peak.mz += error
         return dist
@@ -146,14 +149,14 @@ class Analyte:
             avg_mass += peak.mz * peak.intensity
         return round(avg_mass, 3)
 
-    def plot(self, ax:matplotlib.axes.Axes=None, y_max: int | float=None, annotate:bool=True, label:str= 'Theoretical', colour:str= '#d1495b', cumulative_threshold:float=0.99999) -> matplotlib.axes.Axes:
+    def plot(self, ax:Axes=None, y_max: int | float=None, mass_labels:bool=True, label:str='Theoretical', colour:str|None=None, cumulative_threshold:float=0.99999) -> Axes:
         """
         Generates a stem plot of the isotopic distribution of the molecule. Useful for visualizing the isotopic distribution.
 
         Args:
             ax: Optionally, provide an existing axes object to plot on. If no axes object is provided, a new figure and axes are created.
             y_max: Optionally, provide a maximum y-axis value to scale the plot to.
-            annotate: If True, annotate each peak with its exact m/z value (2 decimal places).
+            mass_labels: If True, annotate each peak with its exact m/z value (2 decimal places).
             label: Label for the plot legend.
             colour: Colour for the stem plot.
             cumulative_threshold: Cutoff for the isotopic distribution. Since distributions can have long tails, this keeps the plot more manageable.
@@ -165,7 +168,7 @@ class Analyte:
         x = []
         y = []
 
-        mass_start, mass_end = self._calc_iso_dist_range(cumulative_threshold=cumulative_threshold, left_pad=0, right_pad=0)
+        mass_start, mass_end = self.calc_iso_dist_range(cumulative_threshold=cumulative_threshold, left_pad=0, right_pad=0)
 
         for peak in self.isotopic_distribution:
             if mass_start <= peak.mz <= mass_end:
@@ -184,16 +187,19 @@ class Analyte:
             plt.ylabel(f'Intensity (au)')
             plt.xlabel('m/z')
 
-        ax.stem(x, y, markerfmt='.', basefmt=colour, linefmt=colour, label=label)
+        if colour is None:
+            colour = ax._get_lines.get_next_color()
 
-        if annotate:
+        ax.stem(x, y, markerfmt='.', label=label, basefmt=colour, linefmt=colour)
+
+        if mass_labels:
             for x,y in zip(x, y):
-                ax.annotate(f'{round(x, 2)}', (x, y + 0.025), rotation=90, ha='center')
+                ax.annotate(f'{round(x, 2)}', (x, y*1.05 + 0.04), rotation=90, ha='center')
 
         return ax
 
 
-    def _calc_iso_dist_range(self, cumulative_threshold=0.95, left_pad=10, right_pad=10) -> tuple:
+    def calc_iso_dist_range(self, cumulative_threshold=0.95, left_pad=10, right_pad=10) -> tuple:
         """
         Calculates the mass range where isotopes of the same molecule may be observed.
 
@@ -298,7 +304,7 @@ class Oligo(Analyte):
 
 
         Attributes:
-            seq (str): Sequence of nucleotides, e.g. 'ACTGTA'.
+            seq (str): Sequence of nucleotides, in the 5' to 3' direction, e.g. 'ACTGTA'.
             type (str): `DNA` or `RNA`.
             composition (dict): Elemental composition of the oligo, including any modifications.
             mods (dict): Elemental composition of modifications applied to the oligo.
@@ -353,7 +359,6 @@ class Oligo(Analyte):
         return composition
 
 
-# TODO: build this class
 class Peptide(Analyte):
     """
     <b>STILL UNDER CONSTRUCTION.</b>
@@ -366,11 +371,49 @@ class Peptide(Analyte):
 
     """
 
-    AMINO_ACIDS = {}
+    AMINO_ACIDS = {
+        # Compositions of the free amino acids (i.e. with a free amine and a free carboxylic acid).
+        # When residues are joined into a peptide chain, one water molecule is lost per peptide bond
+        # (see BONDS, below).
+        'G': {'C': 2,  'H': 5,  'N': 1, 'O': 2, 'P': 0, 'S': 0},  # Glycine
+        'A': {'C': 3,  'H': 7,  'N': 1, 'O': 2, 'P': 0, 'S': 0},  # Alanine
+        'S': {'C': 3,  'H': 7,  'N': 1, 'O': 3, 'P': 0, 'S': 0},  # Serine
+        'P': {'C': 5,  'H': 9,  'N': 1, 'O': 2, 'P': 0, 'S': 0},  # Proline
+        'V': {'C': 5,  'H': 11, 'N': 1, 'O': 2, 'P': 0, 'S': 0},  # Valine
+        'T': {'C': 4,  'H': 9,  'N': 1, 'O': 3, 'P': 0, 'S': 0},  # Threonine
+        'C': {'C': 3,  'H': 7,  'N': 1, 'O': 2, 'P': 0, 'S': 1},  # Cysteine
+        'L': {'C': 6,  'H': 13, 'N': 1, 'O': 2, 'P': 0, 'S': 0},  # Leucine
+        'I': {'C': 6,  'H': 13, 'N': 1, 'O': 2, 'P': 0, 'S': 0},  # Isoleucine
+        'N': {'C': 4,  'H': 8,  'N': 2, 'O': 3, 'P': 0, 'S': 0},  # Asparagine
+        'D': {'C': 4,  'H': 7,  'N': 1, 'O': 4, 'P': 0, 'S': 0},  # Aspartate
+        'Q': {'C': 5,  'H': 10, 'N': 2, 'O': 3, 'P': 0, 'S': 0},  # Glutamine
+        'K': {'C': 6,  'H': 14, 'N': 2, 'O': 2, 'P': 0, 'S': 0},  # Lysine
+        'E': {'C': 5,  'H': 9,  'N': 1, 'O': 4, 'P': 0, 'S': 0},  # Glutamate
+        'M': {'C': 5,  'H': 11, 'N': 1, 'O': 2, 'P': 0, 'S': 1},  # Methionine
+        'H': {'C': 6,  'H': 9,  'N': 3, 'O': 2, 'P': 0, 'S': 0},  # Histidine
+        'F': {'C': 9,  'H': 11, 'N': 1, 'O': 2, 'P': 0, 'S': 0},  # Phenylalanine
+        'R': {'C': 6,  'H': 14, 'N': 4, 'O': 2, 'P': 0, 'S': 0},  # Arginine
+        'Y': {'C': 9,  'H': 11, 'N': 1, 'O': 3, 'P': 0, 'S': 0},  # Tyrosine
+        'W': {'C': 11, 'H': 12, 'N': 2, 'O': 2, 'P': 0, 'S': 0},  # Tryptophan
+    }
 
-    BONDS = {}
+    BONDS = {
+        # Forming a peptide bond between two residues releases one water molecule (condensation reaction).
+        'peptide': {'C': 0, 'H': -2, 'N': 0, 'O': -1, 'P': 0, 'S': 0}
+    }
 
-    KNOWN_MODIFICATIONS = {}
+    KNOWN_MODIFICATIONS = {
+        'phospho':           {'C': 0, 'H': 1,  'N': 0,  'O': 3, 'P': 1, 'S': 0},  # Phosphorylation (Ser/Thr/Tyr)
+        'acetyl':            {'C': 2, 'H': 2,  'N': 0,  'O': 1, 'P': 0, 'S': 0},  # Acetylation (N-term/Lys)
+        'methyl':            {'C': 1, 'H': 2,  'N': 0,  'O': 0, 'P': 0, 'S': 0},  # Methylation (Lys/Arg)
+        'dimethyl':          {'C': 2, 'H': 4,  'N': 0,  'O': 0, 'P': 0, 'S': 0},  # Dimethylation (Lys/Arg)
+        'trimethyl':         {'C': 3, 'H': 6,  'N': 0,  'O': 0, 'P': 0, 'S': 0},  # Trimethylation (Lys)
+        'oxidation':         {'C': 0, 'H': 0,  'N': 0,  'O': 1, 'P': 0, 'S': 0},  # Oxidation (Met/Cys/Trp)
+        'deamidation':       {'C': 0, 'H': -1, 'N': -1, 'O': 1, 'P': 0, 'S': 0},  # Deamidation (Asn/Gln)
+        'amidation':         {'C': 0, 'H': 1,  'N': 1,  'O': -1,'P': 0, 'S': 0},  # C-terminal amidation
+        'carbamidomethyl':   {'C': 2, 'H': 3,  'N': 1,  'O': 1, 'P': 0, 'S': 0},  # Cys alkylation (e.g. with iodoacetamide)
+        'ubiquitination':    {'C': 4, 'H': 6,  'N': 2,  'O': 2, 'P': 0, 'S': 0},  # GG remnant left on Lys after trypsin digestion of ubiquitin
+    }
 
     def __init__(self, name: str, seq: str, charge:int = +1, mods:None|list|dict|str=None):
         """
@@ -400,8 +443,21 @@ class Peptide(Analyte):
 
     def _peptide_composition(self) -> dict:
         """
-        Takes an oligo sequence and returns an elemental composition map.
+        Takes an amino acid sequence and returns an elemental composition map.
         """
+        if len(self.seq) < 1:
+            raise ValueError("Peptide sequence must be at least one residue long.")
+
         composition = {'C': 0, 'H': 0, 'N': 0, 'O': 0, 'P': 0, 'S': 0}
 
-        return composition  # stub
+        # Add up free amino acid compositions
+        for aa in self.seq:
+            for ele in composition.keys():
+                composition[ele] += self.AMINO_ACIDS[aa][ele]
+
+        # Add peptide bonds (each bond condenses out one water molecule)
+        peptide_bonds = len(self.seq) - 1
+        for ele in composition.keys():
+            composition[ele] += self.BONDS['peptide'][ele] * peptide_bonds
+
+        return composition

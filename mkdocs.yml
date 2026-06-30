@@ -25,14 +25,20 @@ plugins:
             show_source: true
             show_root_heading: true
 
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.superfences
+
 nav:
   - Home: index.md
   - Guides:
-    - Getting Started: guides/overview.md
+    - Getting started: guides/overview.md
     - Input data formatting assistance: guides/data_formatting.md
-    - Planning an Experiment: guides/plan-experiment.md
-    - Analyzing an Experiment: guides/analyze-experiment.md
-    - Scoring Enzymes: guides/score-enzymes.md
+    - Planning an experiment: guides/plan-experiment.md
+    - Analyzing an experiment: guides/analyze-experiment.md
+    - Scoring enzymes: guides/score-enzymes.md
   - API:
     - Analytes: api/analytes.md
     - Sample: api/sample.md
