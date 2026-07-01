@@ -36,7 +36,7 @@ nav:
   - Guides:
     - Getting started: guides/overview.md
     - Input data formatting assistance: guides/data_formatting.md
-    - Planning an experiment: guides/plan-experiment.md
+    - Planning an experiment using the Analyte class: guides/plan-experiment.md
     - Analyzing an experiment: guides/analyze-experiment.md
     - Scoring enzymes: guides/score-enzymes.md
   - API:

@@ -144,7 +144,7 @@ base_oligos = [
 
 ## Step 5 — Re-run the polymerization check
 
-Repeat Step 3 with the redesigned panel to confirm that all conflicts have been resolved.
+Now, let's visualize what the polymerization products look like with the new oligos. 
 
 ```python
 fig, ax = plt.subplots(figsize=(10, 2))
@@ -180,7 +180,7 @@ Since MASSIVE can calculate isotopic distribution ranges, we can use python buil
 
 Here, we will compile all oligos into a single list, then use `itertools.combinations` to check every possible pairwise combination of oligos to see if their ranges overlap.
 
-`Analyte.calc_iso_dist_range()` allows the user to decide at what point to cut off the distribution tail based on total expected signal. In this case, we can set the distributions to include 99.9% of the total signal 
+`Analyte.calc_iso_dist_range()` allows the user to decide at what point to cut off the distribution tail based on total expected signal. In this case, we can set the distributions to include 99.9% of the total signal.
 
 ```python
 from itertools import combinations
