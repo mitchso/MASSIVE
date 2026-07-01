@@ -8,6 +8,12 @@ Software for visualizing and quantifying known analytes in MALDI-ToF Mass Spectr
 
 For detailed documentation, please visit the [documentation page](https://mitchso.github.io/MASSIVE/).
 
+## Contributing
+
+Contributions are welcome! You can make suggestions or report bugs by opening an issue.
+
+If you would like to contribute code, please create a new branch and submit a pull request.
+
 
 ## Citation
 
