@@ -132,6 +132,7 @@ class Collection:
     def plot(
             self,
             ids: list,
+            chip: int=0,
             xlim: tuple=None,
             title: str|None=None,
             filtered: bool=False,
@@ -188,8 +189,15 @@ class Collection:
         )
 
         ### plot each sample
+        if chip == 0:
+            samples = self.samples
+        elif chip == 1:
+            samples = self.calibrant_spots
+        else:
+            raise ValueError(f"Chip {chip} not recognized. Must be 0 or 1.")
+
         for n, id in enumerate(ids):
-            sample = self.samples[id]
+            sample = samples[id]
 
             if overlay:
                 ax = axs

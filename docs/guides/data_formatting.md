@@ -28,3 +28,6 @@ i.e.
 ```
 
 See /data for example files.
+
+# Inspiration
+https://codeberg.org/sgibb/MALDIquantForeign

@@ -1,4 +1,4 @@
-# Planning a MALDI Experiment using the Analyte classes
+# Planning a MALDI Experiment using Analyte classes
 
 ## Overview
 
