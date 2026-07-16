@@ -309,7 +309,8 @@ class Analyte:
 
     def calc_signal_overlap(self, second_analyte: Self, resolution: float, minimum_intensity: float = 0.01) -> float:
         """
-        Caclulates the signal overlap between two Analytes, given a certain instrument resolution.
+        Calculates the signal overlap between two Analytes, given a certain instrument resolution.
+
         Args:
             second_analyte: The other Analyte to compare against.
             resolution: Instrument resolving power (R = m/Δm) used to generate each envelope.
