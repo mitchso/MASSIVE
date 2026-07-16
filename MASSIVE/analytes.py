@@ -1,7 +1,9 @@
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 from brainpy import isotopic_variants
+from typing import Self
 
 
 class Analyte:
@@ -134,6 +136,46 @@ class Analyte:
             peak.mz += error
         return dist
 
+    def _calc_iso_dist_envelope(self, resolution):
+        """
+        Predicts the isotopic distribution of a molecule based on the given instrument resolution, using Gaussian broadening.
+        Args:
+            resolution: R = m / Δm
+
+        Returns:
+            mz_axis: m/z values of the Gaussian envelope
+            envelope: intensity values of the Gaussian envelope
+
+        """
+        mass_start, mass_end = self.calc_iso_dist_range(cumulative_threshold=0.99999, left_pad=0, right_pad=0)
+        x = [peak.mz for peak in self.isotopic_distribution]
+        y = [peak.intensity for peak in self.isotopic_distribution]
+
+        # Build a fine m/z axis spanning a bit wider than the sticks themselves,
+        # so broadened peak tails aren't cut off at the plot edges.
+        padding = (mass_end - mass_start) * 2
+        mz_axis = np.linspace(mass_start - padding, mass_end + padding, 5000)
+        envelope = np.zeros_like(mz_axis)
+
+        for peak_mz, peak_intensity in zip(x, y):
+            fwhm = peak_mz / resolution  # Δm = m/R
+            sigma = fwhm / 2.3548  # convert FWHM to Gaussian std dev
+            envelope += peak_intensity * np.exp(-0.5 * ((mz_axis - peak_mz) / sigma) ** 2)
+
+        # scale envelope to match the intensity values of self.isotopic_distribution
+        envelope /= max(envelope)  # scale max intensity to 1
+        envelope /= max(envelope)  # scale max intensity to 1
+        envelope *= max(y) * 1.1  # scale to sit just above the tallest peak
+
+        # trim envelope where the value is negligible
+        threshold = envelope.max() * 0.0001
+        nonzero = np.where(envelope > threshold)[0]
+        start, end = nonzero[0], nonzero[-1]
+        mz_axis = mz_axis[start : end+1]
+        envelope = envelope[start : end+1]
+
+        return mz_axis, envelope
+
     def _calc_monoisotopic_mass(self) -> float:
         """
         Calculates the monoisotopic mass to 3 decimal places.
@@ -149,7 +191,7 @@ class Analyte:
             avg_mass += peak.mz * peak.intensity
         return round(avg_mass, 3)
 
-    def plot(self, ax:Axes=None, y_max: int | float=None, mass_labels:bool=True, label:str='Theoretical', colour:str|None=None, cumulative_threshold:float=0.99999) -> Axes:
+    def plot(self, ax:Axes=None, y_max: int | float=None, mass_labels:bool=True, label:str='Theoretical', colour:str|None=None, cumulative_threshold:float=0.99999, resolution:float|None=None) -> Axes:
         """
         Generates a stem plot of the isotopic distribution of the molecule. Useful for visualizing the isotopic distribution.
 
@@ -160,6 +202,11 @@ class Analyte:
             label: Label for the plot legend.
             colour: Colour for the stem plot.
             cumulative_threshold: Cutoff for the isotopic distribution. Since distributions can have long tails, this keeps the plot more manageable.
+            resolution: Optionally, the instrument's resolving power (R = m/Δm, where Δm is FWHM).
+                If provided, each theoretical isotope peak is broadened into a Gaussian of the
+                appropriate width and summed into a continuous envelope, approximating what the
+                instrument would actually observe. If None (default), only the raw
+                stick spectrum is shown.
 
         Returns:
             An axes object containing the stem plot.
@@ -195,6 +242,10 @@ class Analyte:
         if mass_labels:
             for x,y in zip(x, y):
                 ax.annotate(f'{round(x, 2)}', (x, y*1.05 + 0.04), rotation=90, ha='center')
+
+        if resolution:
+            mz_axis, envelope = self._calc_iso_dist_envelope(resolution)
+            ax.plot(mz_axis, envelope, color=colour, alpha=0.6, linewidth=1.5, label=f'_')
 
         return ax
 
@@ -254,6 +305,59 @@ class Analyte:
             mai = 0
 
         return mai
+
+
+    def calc_signal_overlap(self, second_analyte: Self, resolution: float, minimum_intensity: float = 0.01) -> float:
+        """
+        Caclulates the signal overlap between two Analytes, given a certain instrument resolution.
+        Args:
+            second_analyte: The other Analyte to compare against.
+            resolution: Instrument resolving power (R = m/Δm) used to generate each envelope.
+            minimum_intensity: Fraction (0-1) of each envelope's own max intensity below which
+                signal is ignored. Gaussian tails decay slowly, so without a cutoff, two peaks
+                that look visually separate can still show a surprisingly large overlap area
+                purely from far tail contributions. Raising this value excludes those thin tails
+                and makes the metric better match visual/practical separation. Defaults to 0.01
+                (1% of each peak's own max).
+
+        Returns:
+            Fraction of signal overlap between the two Analytes, calculated as the total overlapping area divided by the total area of the two Analytes. 0 means no overlap, 1 means complete overlap.
+
+        """
+        mz_self, env_self = self._calc_iso_dist_envelope(resolution)
+        mz_other, env_other = second_analyte._calc_iso_dist_envelope(resolution)
+
+        # Build one shared m/z axis spanning both envelopes, using the finer of the
+        # two spacings so we don't lose resolution from either curve.
+        mz_min = min(mz_self.min(), mz_other.min())
+        mz_max = max(mz_self.max(), mz_other.max())
+        spacing = min(mz_self[1] - mz_self[0], mz_other[1] - mz_other[0])
+        n_points = int((mz_max - mz_min) / spacing) + 1
+        shared_axis = np.linspace(mz_min, mz_max, n_points)
+
+        # Interpolate both envelopes onto the shared axis. Outside an envelope's
+        # original range, treat its value as 0 (no signal).
+        interp_self = np.interp(shared_axis, mz_self, env_self, left=0, right=0)
+        interp_other = np.interp(shared_axis, mz_other, env_other, left=0, right=0)
+
+        # Zero out low-lying tails below minimum_intensity (relative to each curve's
+        # own max) so far tail overlap doesn't dominate the percentage.
+        interp_self[interp_self < minimum_intensity * interp_self.max()] = 0
+        interp_other[interp_other < minimum_intensity * interp_other.max()] = 0
+
+        # At each point, the overlap is however much the smaller curve contributes -
+        # you can't overlap more than the shorter one allows.
+        overlap_curve = np.minimum(interp_self, interp_other)
+
+        # Integrate (area under curve) using the trapezoidal rule
+        area_self = np.trapezoid(interp_self, shared_axis)
+        area_other = np.trapezoid(interp_other, shared_axis)
+        overlap_area = np.trapezoid(overlap_curve, shared_axis)
+
+        union_area = area_self + area_other - overlap_area
+        percent_overlap = (overlap_area / union_area ) if union_area > 0 else 0
+
+        return float(round(percent_overlap, 3))
 
 
 class Oligo(Analyte):

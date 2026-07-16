@@ -155,6 +155,7 @@ class Collection:
 
         Args:
             ids: list of IDs to plot, in order (top to bottom)
+            chip: 0 for raw data, 1 for calibrant data
             figsize: (width, height) in inches; auto-sized if None
             title: figure suptitle
             overlay: draw all spectra on one axis instead of stacking
