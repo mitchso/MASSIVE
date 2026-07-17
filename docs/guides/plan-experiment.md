@@ -61,13 +61,14 @@ base_oligos = [
 
 ## Step 2 — Check the mass distributions of the base oligos
 
-Let's plot these oligos to see if they are mass-resolved.
+Let's plot these oligos to see if they are mass-resolved. The `Analyte.plot()` method will automatically generate the isotopic distribution of each oligo, and if you know the resolution of the instrument you will use, 
+the `resolution` parameter will allow you to estimate the actual signal distribution. If you don't know the resolution, you can leave this parameter blank or make a guess. 
 
 ```python
 fig, ax = plt.subplots(figsize=(10, 2))
 
 for i, o in enumerate(base_oligos):
-    o.plot(ax=ax, label=o.name, colour=colours[i], mass_labels=False)
+    o.plot(ax=ax, label=o.name, colour=colours[i], mass_labels=False, resolution=5000)
 
 ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 ax.set_xlabel('m/z')
@@ -79,7 +80,12 @@ ax.set_ylabel('Relative intensity')
 
 > **Notice:** It's a bit tight, but these oligos are mass-resolved. If you were to run these together on MALDI, you would be able to quantify the relative abundance of each one. Great!
 
+
+
+
 ---
+
+
 
 ## Step 3 — Check for overlap with polymerization products
 
@@ -130,7 +136,7 @@ In the example below, we have made some minimal changes to the base oligos:
 | 3'G   | 5' dG                   | ~350            | <$1               |
 
 ```python
-base_oligos = [
+updated_oligos = [
     Oligo(name='base_3C', seq='TGAAGACCACAACC', mods=None),
     Oligo(name='base_3T', seq= 'GAAGACCACAACT', mods='PS'),
     Oligo(name='base_3A', seq= 'GAAGACCACAACA', mods='5P'),
@@ -149,15 +155,15 @@ Now, let's visualize what the polymerization products look like with the new oli
 ```python
 fig, ax = plt.subplots(figsize=(10, 2))
 
-for i, o in enumerate(base_oligos):
+for i, o in enumerate(updated_oligos):
 
     o.plot(ax=ax, label=o.name, colour=colours[i], mass_labels=False)
 
     for N in polymerization_options:
         o_pol = Oligo(seq=o.seq + N, name=f"{o.name}{N}", mods=[o.mods, '3P'])
-        o_pol.plot(ax=ax, label=o_pol.name, colour=colours[i], mass_labels=False)
+        o_pol.plot(ax=ax, label=o_pol.name, colour=colours[i], mass_labels=False, resolution=5000)
 
-ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+ax.legend(bbox_to_anchor=(1.05, 1), loc='center left')
 ax.set_xlabel('m/z')
 ax.set_ylabel('Relative intensity')
 ```
@@ -174,47 +180,63 @@ Here is the plot zoomed a bit closer to the polymerization products.
 
 Zooming in further, we can see that each peak produces from polymerizing the base 3'T oligo is differentiated.
 
-## Algorithmic approach
+## Quantitative simulations
 
-Since MASSIVE can calculate isotopic distribution ranges, we can use python builtins to perform a more quantitative check.
+Given that this experiment contains analytes with very similar masses, the question that arises is, what instrument resolution is required to comfortably differentiate these analytes?
 
-Here, we will compile all oligos into a single list, then use `itertools.combinations` to check every possible pairwise combination of oligos to see if their ranges overlap.
+We can answer this quantitatively using `Analyte` methods. MASSIVE can simulate signal distributions at a given resolution, and the `Analyte.calc_signal_overlap()` method allows two Analytes to be compared,
+returning the percentage overlap between the signals.
 
-`Analyte.calc_iso_dist_range()` allows the user to decide at what point to cut off the distribution tail based on total expected signal. In this case, we can set the distributions to include 99.9% of the total signal.
+Here, we will compile all oligos into a single list, sort them by mass, then use `Analyte.calc_signal_overlap()` across a range of resolutions to determine the appropriate instrument requirements.
+
 
 ```python
-from itertools import combinations
-
-all_analytes = base_oligos.copy()
-for o in base_oligos:
+# collect all analytes into a single list
+all_analytes = []
+for o in updated_oligos:
+    all_analytes.append(o)
     for N in polymerization_options:
-        o_pol = Oligo(seq=o.seq + N, name='', mods=[o.mods, '3P'])
+        o_pol = Oligo(seq=o.seq + N, name=f"{o.name}{N}", mods=[o.mods, '3P'])
         all_analytes.append(o_pol)
 
-def overlap(oligo1, oligo2):
-    "returns true if oligos overlap in mass range"
-    start1, end1 = oligo1.calc_iso_dist_range(cumulative_threshold=0.999, left_pad=0, right_pad=0)
-    start2, end2 = oligo2.calc_iso_dist_range(cumulative_threshold=0.999, left_pad=0, right_pad=0)
-    if start1 <= end2 and start2 <= end1:
-        return True
-    else:
-        return False
+# sort the list by mass
+sorted_analytes = sorted(all_analytes, key=lambda o: o.monoisotopic_mass)
 
-num_overlaps = 0
-non_overlapping = 0
-for oligo1, oligo2 in combinations(all_analytes, 2):
-    if overlap(oligo1, oligo2):
-        num_overlaps += 1
-    else:
-        non_overlapping += 1
+# define the parameters of the analysis
+resolutions = range(1, 5000, 50)  # range of resolutions to consider
+overlap_threshold = 0.01    # threshold for considering two oligos overlapping, they will be considered overlapping if their signal overlaps by at least 1%
 
-print(f"Number of overlapping oligo pairs: {num_overlaps}")
-print(f"Number of non-overlapping oligo pairs: {non_overlapping}")
+def num_overlaps(resolution):   # function to count the number of oligos with overlapping signal at a given resolution
+    num_overlaps = 0
+    for i, o in enumerate(sorted_analytes):
+        try:
+            percent_overlap = o.calc_signal_overlap(sorted_analytes[i+1], resolution=resolution)
+            if percent_overlap > overlap_threshold:
+                num_overlaps += 1
+        except IndexError:
+            pass
+    return num_overlaps
+
+# calculate the number of overlaps at each resolution
+overlaps = [num_overlaps(r) for r in resolutions]
+
+# plot and format
+fig, ax = plt.subplots(figsize=(7, 4))
+ax.plot(resolutions, overlaps, marker='o', markersize=3)
+ax.set_xlabel('Instrument resolution (R = m/Δm)')
+ax.set_ylabel('Number of oligos with overlapping signal')
+ax.set_title(f'Signal overlap vs. resolution, across entire set of oligos')
 ```
-```aiignore
-Number of overlapping oligo pairs: 0
-Number of non-overlapping oligo pairs: 190
-```
+
+![Signal overlap vs. resolution](../images/overlap_vs_resolution.svg)
+
+> **Result:** We now know that these oligos can be unambiguously differentiated as long as the instrument has a resolution of ~2000 or greater.
+
+With this information, let's go back and take a look at a cluster of analytes at 2000 resolution.
+
+![Analytes at 2000 resolution](../images/analytes_at_2000_resolution.svg)
+
+Looks about right! The tails of each distribution are very close to each other, but the peak of each distribution is clearly differentiated.
 
 ## Summary
 
