@@ -6,10 +6,10 @@ from . import helper
 from . import analytes
 from typing import Literal
 
-# TODO: implement actual baseline subtraction algorithms
-# TODO: implement actual peak identification algorithms
-# TODO: improve peak intensity calling
-# TODO: implement peak area calculation and visualization
+# TODO: implement actual baseline subtraction algorithms    https://github.com/derb12/pybaselines
+# TODO: implement actual peak identification algorithms     make this work like your evolvepro implementation - there's a default easy way, but the function can accept completely custom implementations
+# TODO: improve peak intensity calling                      refine search space to be near expected peak based on calculated isotope distribution. and also return deviation, include 'tolerance' concept here
+# TODO: implement peak area calculation and visualization   low priority
 
 class Sample:
     """
@@ -160,7 +160,7 @@ class Sample:
         return fig, ax
 
 
-    # TODO: make this the main plot that gets called by Experiment
+    # TODO: make this the main plot that gets called by Collection
     def sorted_signal_plot(self) -> matplotlib.axes.Axes:
         """
         Generates # TODO finish describing.

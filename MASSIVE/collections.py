@@ -16,6 +16,16 @@ from matplotlib.figure import Figure
     # exploratory - sample to sample comparisons
     # directed - sample to analyte comparisons
 
+# TODO: implement handling for data files of various formats
+    # csv   - low priority but very easy switch
+    # tsv   - the only thing that currently works
+    # mzML  - highest priority, use pymzml package (not pyopenms, it's too much)
+    # mzXML
+    # XML
+    # Additional changes:
+    #   don't assume file names will contain specific information
+    #   auto detect format by extension
+
 class Collection:
     """
     General collection of [`Samples`][MASSIVE.sample.Sample]. All `Samples` in a `Collection` can be analyzed simultaneously, and `Collection` contains numerous methods for visualizing and quantifying the data.
