@@ -13,10 +13,16 @@ import sys
 import os
 import math
 from collections.abc import Callable
+from MASSIVE.helper import get_aa_position
 
 warnings.simplefilter(action='ignore', category=FutureWarning)
 warnings.simplefilter(action="ignore", category=UserWarning)
 
+plt.rcParams.update({'font.family': 'Arial',
+                     'font.size': 13,
+                     'text.color': 'black',
+                     'axes.labelcolor': 'black',
+                     'axes.axisbelow': True})
 
 def default_activity_score(unreacted: float, correct: float, a1=1, a2=1, b1=2, b2=2):
     """Converts measurements of unreacted, correct and incorrect products into an aggregate score."""
@@ -85,20 +91,6 @@ def activity_score_c_only(unreacted: float, correct: float, a1=1, a2=1, b1=1, b2
         score = reacted * correctness
 
     return score
-
-
-def get_aa_position(label):
-    """
-    returns integer value of amino acid position from single character labels.
-    EXAMPLE:    "D83A" return int(83)
-                "S340P" returns int(340)
-                "blah" returns 0
-    """
-    try:
-        pos = int(label[1:-1])
-        return pos
-    except ValueError:
-        return 0
 
 
 class DataProcessor:
@@ -359,7 +351,7 @@ class DataProcessor:
             cols = y_labels
 
             rows = df.loc[df['source'].isin(source)]  # slice only the correct source plate(s)
-            rows = rows.loc[df['well'].isin(wells)] #slice only the correct wells for a particular x_label
+            rows = rows.loc[df['id'].isin(wells)] #slice only the correct wells for a particular x_label
             rows = rows[cols]   # slice only the columns corresponding to MOIs you want to work with
             rows['total'] = rows.sum(axis=1)    # total ion intensity across all MOIs for a row
             rows = rows.div(rows['total'], axis=0)  # converts every column to a percentage of total signal
@@ -450,7 +442,7 @@ class DataProcessor:
                 print(f"IndexError: '{x_label}' is not a column in the DataFrame.")
                 sys.exit(0)
 
-            wells = df.loc[df[x_category] == x_label]['well'].tolist()
+            wells = df.loc[df[x_category] == x_label]['id'].tolist()
             x_wells[x_label] = {'source': source,
                                 'wells': wells}
 
@@ -537,10 +529,6 @@ class DataProcessor:
             ax.set_xlim(-0.5, len(ddict) - 0.5)
 
         # Formatting
-        plt.rcParams.update({'font.family': 'Arial',
-                             'font.size': 13,
-                             'text.color': 'black',
-                             'axes.labelcolor': 'black'})
         sns.set_style('ticks')  # Necessary to see minor ticks
 
         # ticks
@@ -555,6 +543,7 @@ class DataProcessor:
         ax.tick_params(color='black', labelcolor='black')
 
         # exterior and grid
+        ax.set_axisbelow(True)
         for spine in ax.spines.values():
             spine.set_edgecolor('black')
         ax.grid(color='black', axis='y', linewidth=0.5)
@@ -580,10 +569,6 @@ class DataProcessor:
 
         """Function only holds for my specific experimental setup because it assumes the score is a certain composite of
         different nucleotide additions"""
-        plt.rcParams.update({'font.family': 'Arial',
-                             'font.size': 13,
-                             'text.color': 'black',
-                             'axes.labelcolor': 'black'})
 
         df = self.data_as_percentage
 
@@ -623,6 +608,7 @@ class DataProcessor:
             bottom = [v1 + v2 for v1, v2 in zip(bottom, height)]  # update bottom for next bar
 
         # ticks
+        ax.set_axisbelow(True)
         ax.set_xlim(-0.5, len(x_labels)-0.5)    # for some reason this is necessary to get the same alignment as self.stacked_bar
         # ax.set_ylim(0, 4)
         # ax.set_yticks(ticks=[0, 1, 2, 3, 4])

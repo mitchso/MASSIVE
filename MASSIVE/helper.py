@@ -33,6 +33,20 @@ def _savitzky_golay(i: list, window=15, polyorder=3):
     return savgol_filter(i, window_length=window, polyorder=polyorder)
 
 
+def get_aa_position(label):
+    """
+    returns integer value of amino acid position from single character labels.
+    EXAMPLE:    "D83A" return int(83)
+                "S340P" returns int(340)
+                "blah" returns 0
+    """
+    try:
+        pos = int(label[1:-1])
+        return pos
+    except ValueError:
+        return 0
+
+
 def key_to_enz_code(key:str, enz_rows, enz_cols) -> int:
     """
     Converts a key to an unambiguous enzyme code based on information in the enz_rows and enz_cols dictionaries.
