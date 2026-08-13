@@ -274,10 +274,10 @@ class Sample:
 
         ### Add labels and annotations
         if label_peaks:
-            peaks, _ = helper._call_peaks(i_plot)
+            peaks = helper._call_peaks(i_plot)
             for peak in peaks:
                 ax.plot(mz_plot[peak], i_plot[peak], 'x', color='black')
-                ax.vlines(mz_plot[peak], ymin=-9, ymax=i_plot[peak], colors='grey')
+                ax.vlines(mz_plot[peak], ymin=min(i_plot), ymax=i_plot[peak], colors='grey')
                 ax.text(
                     x=mz_plot[peak], y=i_plot[peak] + 10,
                     s=str(int(round(mz_plot[peak], 0))),

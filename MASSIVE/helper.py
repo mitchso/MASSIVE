@@ -29,6 +29,7 @@ colour_dict = {'dark grey': '#333333',
                'green': '#7acc52',
                'light green': '#b1cca3'}
 
+
 def _savitzky_golay(i: list, window=15, polyorder=3):
     return savgol_filter(i, window_length=window, polyorder=polyorder)
 
@@ -90,10 +91,8 @@ def _call_peaks(i_list: list) -> list[int]:
     Returns index positions of the peaks based on the list of intensity values provided.
     """
     peak_indices, properties = find_peaks(i_list,
-                                          prominence=200,
-                                          height=max(i_list) / 10,
-                                          threshold=max(i_list) / 10,
-                                          distance=100)
+                                          prominence=max(i_list) / 20,
+                                          distance=50)
 
     return list(peak_indices)
 
@@ -171,7 +170,7 @@ def _get_nested_attr(object, attr):
         return attr_value
 
     except AttributeError:
-        print(f"Unable to access attribute {attr}. Skipping.")
+        print(f"Unable to access attribute \'{attr}\' of {object.id}. Skipping.")
         return None
 
 def _slice_spectrum(start: int, end: int, mz: list, i: list) -> tuple:

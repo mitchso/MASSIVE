@@ -6,6 +6,7 @@ from .sample import Sample
 from scipy.signal import find_peaks
 from string import ascii_uppercase
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.ticker as tck
 from matplotlib.axes import Axes
@@ -508,6 +509,60 @@ class Plate(Collection):
             for col in self.columns:
                 positions.append(row + str(col))
         return positions
+
+
+    def load_attrs_from_spreadsheet(self, spreadsheet_path:str, attrs_dict: dict = {}) -> None:
+        """
+        Warning:
+            This section is under active development and may change without notice.
+
+        OVERWRITES ALL EXISTING ATTRIBUTES.
+        Args:
+            spreadsheet_path: stub
+            attrs_dict: stub
+
+        Returns:
+            None
+
+        """
+        spreadsheets = pd.read_excel(spreadsheet_path, index_col=0, sheet_name=None)  # load all spreadsheets into a dictionary
+        spreadsheets = {key: val for key, val in spreadsheets.items() if not val.empty}  # remove empty sheets
+
+        for attr_name, spreadsheet in spreadsheets.items(): # iterate through all sheets
+            try:    # if there is a dictionary entry that corresponds to the sheet name, use it to assign values.
+                current_dict = attrs_dict[attr_name]
+                assign_literally = False
+
+            except KeyError:    # if not, just assign values literally.
+                print(f"Sheet \'{attr_name}\' has no corresponding entry in attrs_dict. Every entry will be assigned literally.")
+                assign_literally = True
+
+            literal_assignments = []
+            for i, row in spreadsheet.iterrows():
+                for j, entry in row.items():
+                    id = i + str(j)
+
+                    # determine what value to assign to the attribute
+                    if not pd.isna(entry):
+                        if assign_literally:
+                            attr_value = entry
+                        else:
+                            try:
+                                attr_value = current_dict[entry]
+                            except KeyError:    # if the value doesn't exist in the dictionary, assign it literally.
+                                attr_value = entry
+                                literal_assignments.append(entry)
+
+                        try:
+                            self.samples[id].__setattr__(attr_name, attr_value)
+                        except KeyError:    # skip any spreadsheet entries that don't correspond to a sample ID.
+                            print(f"Sample \'{id}\' not found. Skipping.")
+                            continue
+
+            for entry in set(literal_assignments):  # list all the values that were assigned literally.
+                print( f"Value \'{entry}\' has no corresponding entry in attrs_dict[\'{attr_name}\']. Attribute has been assigned literally as \'{entry}\'.")
+
+
 
     def show_sample_positions(self, attrs: list, fontsize=8) -> plt.axes:
         """
