@@ -136,6 +136,20 @@ class Analyte:
             peak.mz += error
         return dist
 
+    def _calc_mods_iso_dist(self, error=0) -> tuple:
+        """
+        Calculates the isotopic distribution of only the Analyte.mods attribute.
+        """
+        if isinstance(self.mods, dict):
+
+            dist = isotopic_variants(self.mods, charge=self.charge)
+            for peak in dist:
+                peak.mz += error
+            return dist
+
+        else:
+            raise ValueError("Analyte.mods must be an elemental composition dict in order to use this function.")
+
     def _calc_iso_dist_envelope(self, resolution):
         """
         Predicts the isotopic distribution of a molecule based on the given instrument resolution, using Gaussian broadening.
@@ -190,6 +204,22 @@ class Analyte:
         for peak in self.isotopic_distribution:
             avg_mass += peak.mz * peak.intensity
         return round(avg_mass, 3)
+
+    def _calc_mods_monoisotopic_mass(self) -> float:
+        """
+        Calculates the monoisotopic mass of Analyte.mods to 3 decimal places.
+        """
+        return round(self._calc_mods_iso_dist()[0].mz, 3)
+
+    def _calc_mods_avg_mass(self):
+        """
+        Calculates the average mass based on isotopic distribution
+        """
+        avg_mass = 0
+        for peak in self._calc_mods_iso_dist():
+            avg_mass += peak.mz * peak.intensity
+        return round(avg_mass, 3)
+
 
     def plot(self, ax:Axes=None, y_max: int | float=None, mass_labels:bool=True, label:str='Theoretical', colour:str|None=None, cumulative_threshold:float=0.99999, resolution:float|None=None) -> Axes:
         """
@@ -396,7 +426,9 @@ class Oligo(Analyte):
         '5PPP':             {'C': 0, 'H': 3, 'N': 0, 'O': 9, 'P': 3, 'S': 0},
         '5App':             {'C': 10, 'H': 14, 'N': 5, 'O': 9, 'P': 2, 'S': 0},
         '5Appp':            {'C': 10, 'H': 14, 'N': 5, 'O': 12, 'P': 3, 'S': 0},
-        '5AmMC12':          {'C': 12, 'H': 26, 'N': 1, 'O': 3, 'P': 1, 'S': 0}   # IDT
+        '5AmMC12':          {'C': 12, 'H': 26, 'N': 1, 'O': 3, 'P': 1, 'S': 0},     # IDT
+        '3AmMO':            {'C': 6, 'H': 14, 'N': 1, 'O': 5, 'P': 1, 'S': 0},      # IDT
+        'iSpPC':            {'C': 13, 'H': 16, 'N': 2, 'O': 7, 'P': 1, 'S': 0},      # IDT
     }
 
     def __init__(self, name:str, seq: str, type:str='DNA', charge:int = +1, mods:None|list|dict|str=None):

@@ -187,6 +187,10 @@ class Collection:
         if hide_excluded:
             ids = [id for id in ids if id not in self.exclude]
 
+        if len(ids) == 0:
+            raise ValueError("No samples to plot. This can occur if \'ids\' is an empty list, or if every item in \'ids\' is in \'self.exclude\'.\n"
+                             "Use \'hide_excluded=False\' to plot ids that are excluded from the analysis.")
+
         if figsize is None:
             figsize = (12, 3) if overlay or len(ids) == 1 else (12, len(ids))
 
@@ -278,7 +282,7 @@ class Collection:
 
         return fig, ax
 
-    def sorted_signal_plot(self, xlim=(50,100), label_noisy_samples=False) -> tuple[Figure, Axes]:
+    def sorted_signal_plot(self, xlim=(50,100), label_noisy_samples=False, hide_excluded=True) -> tuple[Figure, Axes]:
         """
         Visualizes the signal intensity of an entire sample, sorted from low to high and showing how the
         'noise_cutoff' parameter aligns with the data.
@@ -289,6 +293,9 @@ class Collection:
 
         # Collect all the data
         for id, sample in self.samples.items():
+            if hide_excluded and id in self.exclude:
+                continue
+
             x = np.linspace(0, 100, num=len(sample.i))
             y_max = max(sample.i)
             y = sorted([i * 100 / y_max for i in sample.i])
@@ -623,7 +630,7 @@ class Plate(Collection):
 
 
     def heatmap(self, numerator, denominator=None, vmin=0, vmax=None, title=None, cmap='viridis',
-                hide_excluded=False) -> tuple[Figure, Axes]:
+                hide_excluded=True) -> tuple[Figure, Axes]:
         """
         Warning:
             This section is under active development and may change without notice.

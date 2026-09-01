@@ -7,6 +7,7 @@ Warning:
 import seaborn as sns
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator, IndexLocator
 import numpy as np
 import warnings
 import sys
@@ -408,6 +409,7 @@ class DataProcessor:
 
         return ddict
 
+    # TODO: there is a bug where integer x_labels (i.e. enz_ids) or integer x_labels_overwrite (i.e. a list of integers) causes the bars to disappear.
     def stacked_bar(self,
                     global_var: tuple,  # (column, column_value) tuple. Only plots data for rows that have column_value
                     x_category: str,    # which categorical variable to plot as individual samples on the x axis
@@ -483,7 +485,8 @@ class DataProcessor:
                    'label': moi,
                    'color': y_colours[i],
                    'edgecolor': 'black',
-                   'linewidth': 0.5}
+                   'linewidth': 0.5,
+                   'align': 'center'}
 
             ax.bar(**bar)
             bottom = [v1 + v2 for v1, v2 in zip(bottom, avg)]  # update bottom for next bar
@@ -531,14 +534,17 @@ class DataProcessor:
         # Formatting
         sns.set_style('ticks')  # Necessary to see minor ticks
 
-        # ticks
-        x_labels = ddict.keys()
+        # y ticks
         ax.set_ylim(0, 1)
         ax.set_yticks(ticks=[0, 0.25, 0.5, 0.75, 1.0], labels=['0%', '25%', '50%', '75%', '100%'])
         ax.set_yticks(ticks=np.linspace(0, 1, num=20, endpoint=False), minor=True)
         ax.yaxis.get_ticklocs(minor=True)
-        ax.minorticks_on()
-        ax.xaxis.set_tick_params(which='minor', bottom=False)  # turn off x-axis minor ticks
+
+        # x ticks
+        x_labels = ddict.keys()
+        ax.xaxis.set_major_locator(plt.NullLocator())   # necessary to override auto generated ticks
+        ax.xaxis.set_minor_locator(plt.NullLocator())   # necessary to override auto generated ticks
+        ax.xaxis.set_major_locator(IndexLocator(base=1, offset=0.4))  # explicitly draw a tick for each entry. bar_width is default 0.8, so 0.4 offset will center the ticks
         ax.set_xticklabels(labels=x_labels, ha='right', rotation=45)
         ax.tick_params(color='black', labelcolor='black')
 
@@ -610,14 +616,20 @@ class DataProcessor:
         # ticks
         ax.set_axisbelow(True)
         ax.set_xlim(-0.5, len(x_labels)-0.5)    # for some reason this is necessary to get the same alignment as self.stacked_bar
-        # ax.set_ylim(0, 4)
-        # ax.set_yticks(ticks=[0, 1, 2, 3, 4])
-        # ax.set_yticks(ticks=np.linspace(0, 4, num=20, endpoint=False), minor=True)
         ax.yaxis.get_ticklocs(minor=True)
         ax.minorticks_on()
-        ax.xaxis.set_tick_params(which='minor', bottom=False)  # turn off x-axis minor ticks
+
+        # x ticks
+        ax.xaxis.set_major_locator(plt.NullLocator())  # necessary to override auto generated ticks
+        ax.xaxis.set_minor_locator(plt.NullLocator())  # necessary to override auto generated ticks
+        ax.xaxis.set_major_locator(IndexLocator(base=1, offset=0.4))  # explicitly draw a tick for each entry. bar_width is default 0.8, so 0.4 offset will center the ticks
         ax.set_xticklabels(labels=x_labels, ha='right', rotation=45)
         ax.tick_params(color='black', labelcolor='black')
+
+
+
+
+
         # exterior and grid
         for spine in ax.spines.values():
             spine.set_edgecolor('black')
