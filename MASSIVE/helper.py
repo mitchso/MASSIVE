@@ -9,7 +9,7 @@ Warning:
 from scipy.signal import savgol_filter
 from scipy.signal import find_peaks
 from matplotlib.collections import LineCollection
-
+import numpy as np
 
 
 colour_dict = {'dark grey': '#333333',
@@ -152,7 +152,7 @@ def _plot_segmented(axis, mz, i, colour_array, linewidth=1.5):
     """
     colour_segments = _find_colour_segments(colour_array)
     for (seg_start, seg_end), colour in colour_segments.items():
-        axis.plot(mz[seg_start:seg_end], i[seg_start:seg_end], c=colour, linewidth=linewidth, label='Experimental')
+        axis.plot(mz[seg_start:seg_end], i[seg_start:seg_end], c=colour, linewidth=linewidth, label='Experimental', rasterized=True)
 
 
 def _get_nested_attr(object, attr):
@@ -184,3 +184,10 @@ def _slice_spectrum(start: int, end: int, mz: list, i: list) -> tuple:
             mz_slice.append(mz[j])
             i_slice.append(i[j])
     return mz_slice, i_slice
+
+def _downsample_spectrum(x, y, max_points) -> tuple:
+    if len(x) <= max_points:
+        return x, y
+    else:
+        step = int(np.ceil(len(x) / max_points))
+        return x[::step], y[::step]

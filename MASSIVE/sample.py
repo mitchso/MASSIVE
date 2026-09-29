@@ -5,6 +5,7 @@ import random
 from . import helper
 from . import analytes
 from typing import Literal
+import csv
 
 # TODO: implement actual baseline subtraction algorithms    https://github.com/derb12/pybaselines
 # TODO: implement actual peak identification algorithms     make this work like your evolvepro implementation - there's a default easy way, but the function can accept completely custom implementations
@@ -188,7 +189,7 @@ class Sample:
 
         return fig, ax
 
-    def plot_analyte(self, analyte: analytes.Analyte, filtered:bool=True) -> matplotlib.axes.Axes:
+    def plot_analyte(self, analyte: analytes.Analyte, filtered:bool=False) -> matplotlib.axes.Axes:
         """
         Generates a plot for an analyte, zoomed in to visualize the isotope distribution and mass accuracy.
         """
@@ -213,38 +214,20 @@ class Sample:
             custom_colours=None,
             base_colour='#1f77b4',
             analyte_colour='#d1495b',
-            linewidth=1.5
+            linewidth=1.5,
+            downsample_points=100000,
     ) -> None:
         """
         base function for generating and mz vs i plot. Wrapped by other functions.
         """
 
         ### Collect correct mz & i values
-        mz_plot = self.mz
-        i_plot = self.i
-
-        if filtered:    # i is now filtered based on noise cutoff
-            i_plot = self.i_filtered
-
-        if xlim:    # adjust x axis limits
-            mz_plot, i_plot = helper._slice_spectrum(start=xlim[0],
-                                                   end=xlim[1],
-                                                   mz=mz_plot,
-                                                   i=i_plot)
-
-        if smoothed:    # apply a savitzky-golay filter
-            i_plot = helper._savitzky_golay(i=i_plot)
-
-        if normalized:  # normalize to 100 as maximum value
-            try:
-                i_plot = [i*100 / max(i_plot) for i in i_plot]
-            except ZeroDivisionError:
-                print("Normalization failed, all intensity values are 0. \n"
-                      "Try plotting your data without normalization.")
-
-        if overlay: # apply a random scaling to prevent overlapping lines from becoming unreadable
-            i_plot = [i * random.uniform(0.90, 1.00) for i in i_plot]
-
+        mz_plot, i_plot = self._process_spectra(xlim=xlim,
+                                                filtered=filtered,
+                                                smoothed=smoothed,
+                                                normalized=normalized,
+                                                overlay=overlay,
+                                                downsample_points=downsample_points)
 
         ### Assign a colour to every data point
         if custom_colours:
@@ -393,7 +376,7 @@ class Sample:
 
         if theoretical_dist:   # Overlay theoretical isotope distributions
             for a in self.analytes:
-                a.plot(ax=ax, y_max=100, colour=theoretical_colour, annotate=False)
+                a.plot(ax=ax, y_max=100, colour=theoretical_colour, mass_labels=False)
 
             # Create a legend
             handles, labels = plt.gca().get_legend_handles_labels()
@@ -406,4 +389,100 @@ class Sample:
         ax.set_xlabel('m/z')
 
         return ax
+
+    def _process_spectra(self,
+                         xlim=None,
+                         filtered=False,
+                         smoothed=False,
+                         normalized=False,
+                         overlay=False,
+                         downsample_points=100000) -> tuple[list[float], list[float]]:
+        """
+        Applies various processing steps to the spectrum data before plotting or exporting.
+
+        Args:
+            xlim: X-axis limits.
+            normalized: Converts y-axis values to relative intensities (au) between 0 and 100.
+            filtered: If `True`, only plot data points above the noise cutoff. If `False`, plot all data points.
+            smoothed: Apply a savitzky-golay filter to the spectrum.
+            downsample_points: Downsamples the spectrum to a specified number of points.
+
+        Returns:
+            a tuple containing the processed m/z values and intensity values.
+
+        """
+
+        ### Collect correct mz & i values
+        mz_processed = self.mz
+        i_processed = self.i
+
+        if filtered:  # i is now filtered based on noise cutoff
+            i_processed = self.i_filtered
+
+        if len(mz_processed) > downsample_points:
+            mz_processed, i_processed = helper._downsample_spectrum(x=mz_processed, y=i_processed, max_points=downsample_points)
+
+        if xlim:  # adjust x axis limits
+            mz_processed, i_processed = helper._slice_spectrum(start=xlim[0],
+                                                     end=xlim[1],
+                                                     mz=mz_processed,
+                                                     i=i_processed)
+
+        if smoothed:  # apply a savitzky-golay filter
+            i_processed = helper._savitzky_golay(i=i_processed)
+
+        if normalized:  # normalize to 100 as maximum value
+            try:
+                max_i = max(i_processed)
+                i_processed = [i * 100 / max_i for i in i_processed]
+            except ZeroDivisionError:
+                print("Normalization failed, all intensity values are 0. \n"
+                      "Try plotting your data without normalization.")
+
+        if overlay:  # apply a random scaling to prevent overlapping lines from becoming unreadable
+            i_processed = [i * random.uniform(0.90, 1.00) for i in i_processed]
+
+        return mz_processed, i_processed
+
+    def export_spectra(self,
+                       filename: str,
+                       xlim=None,
+                       filtered:bool=False,
+                       smoothed:bool=False,
+                       normalized:bool=False,
+                       downsample_points:int=100000,
+                       **kwargs):
+
+        """
+        Exports the spectrum data to a CSV file, with optional processing steps.
+
+        Args:
+            filename:
+            xlim:
+            filtered:
+            smoothed:
+            normalized:
+            downsample_points:
+            **kwargs:
+
+        Returns:
+            csv file.
+
+        """
+
+
+        mz_processed, i_processed = self._process_spectra(xlim=xlim,
+                                                          filtered=filtered,
+                                                          smoothed=smoothed,
+                                                          normalized=normalized,
+                                                          downsample_points=downsample_points)
+
+        spectra = zip(mz_processed, i_processed)
+
+        with open(filename, 'w') as f:
+            writer = csv.writer(f, delimiter=',')
+            writer.writerow(['m/z', 'Intensity'])
+            writer.writerows(spectra)
+
+
 

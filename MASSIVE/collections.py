@@ -1,4 +1,5 @@
 import os
+import sys
 import random
 import xlsxwriter
 from . import helper
@@ -27,6 +28,8 @@ from matplotlib.figure import Figure
     #   don't assume file names will contain specific information
     #   auto detect format by extension
 
+# TODO: extend Sample.export_spectra to collections of samples
+
 class Collection:
     """
     General collection of [`Samples`][MASSIVE.sample.Sample]. All `Samples` in a `Collection` can be analyzed simultaneously, and `Collection` contains numerous methods for visualizing and quantifying the data.
@@ -53,11 +56,14 @@ class Collection:
         self.exclude = []  # used to remove certain Samples from further analysis.
 
 
-    def reinitiate_samples(self, samples):
+    def reinitiate_samples(self, samples=None):
         """
         Used to overwrite samples when loading them into an Experiment. Useful for when the
         noise_cutoff originally specified for the Sample is different than the global cutoff for the Experiment.
         """
+        if samples is None:
+            samples = self.samples.values()
+
         sample_dict = {}
         for s in samples:
             new_sample = Sample(file=s.file,
@@ -158,6 +164,7 @@ class Collection:
             custom_colours:dict|bool=None,
             base_colour:str='#1f77b4',
             analyte_colour:str='#d1495b',
+            downsample_points:int=100000,
     ) -> tuple[Figure, Axes]:
         """
         Takes a list of [`Sample.id`][MASSIVE.sample.Sample] and returns a plot of each spectrum stacked
@@ -181,6 +188,7 @@ class Collection:
             custom_colours: Passed to [`Sample.plot()`][MASSIVE.sample.Sample.plot]
             base_colour: Passed to [`Sample.plot()`][MASSIVE.sample.Sample.plot]
             analyte_colour: Passed to [`Sample.plot()`][MASSIVE.sample.Sample.plot]
+            downsample_points: Downsamples the number of points in each spectrum to this value. May be helpful for plotting from high-resolution datasets.
 
         """
         ### inital setup
@@ -213,7 +221,11 @@ class Collection:
             raise ValueError(f"Chip {chip} not recognized. Must be 0 or 1.")
 
         for n, id in enumerate(ids):
-            sample = samples[id]
+            try:
+                sample = samples[id]
+            except KeyError:
+                print(f"Error: Sample \"{id}\" not found in the collection.")
+                sys.exit(1)
 
             if overlay:
                 ax = axs
@@ -240,7 +252,8 @@ class Collection:
                                  custom_colours=custom_colours,
                                  base_colour=base_colour,
                                  analyte_colour=analyte_colour,
-                                 linewidth=1.5)
+                                 linewidth=1.5,
+                                 downsample_points=downsample_points)
 
             ### Formatting
             for spine in ['top', 'right', 'left']:

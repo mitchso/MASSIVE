@@ -429,6 +429,7 @@ class Oligo(Analyte):
         '5AmMC12':          {'C': 12, 'H': 26, 'N': 1, 'O': 3, 'P': 1, 'S': 0},     # IDT
         '3AmMO':            {'C': 6, 'H': 14, 'N': 1, 'O': 5, 'P': 1, 'S': 0},      # IDT
         'iSpPC':            {'C': 13, 'H': 16, 'N': 2, 'O': 7, 'P': 1, 'S': 0},      # IDT
+        '3iSpPC_cleaved': {'C': 13, 'H': 15, 'N': 2, 'O': 5, 'P': 0, 'S': 0},  # IDT
     }
 
     def __init__(self, name:str, seq: str, type:str='DNA', charge:int = +1, mods:None|list|dict|str=None):
